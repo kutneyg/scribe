@@ -1,0 +1,341 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Silent Client Scribe Tool</title>
+    <style>
+        :root {
+            --primary: #0066cc;
+            --danger: #cc3333;
+            --bg: #f8f9fa;
+            --surface: #ffffff;
+            --text: #333333;
+            --border: #dddddd;
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            background-color: var(--bg);
+            color: var(--text);
+            margin: 0;
+            padding: 16px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+        .container {
+            width: 100%;
+            max-width: 500px;
+            background: var(--surface);
+            border-radius: 12px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.05);
+            padding: 20px;
+            box-sizing: border-box;
+        }
+        h2 {
+            margin-top: 0;
+            font-size: 1.4rem;
+            text-align: center;
+            color: #222;
+        }
+        .meta-inputs {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 10px;
+            margin-bottom: 15px;
+        }
+        .meta-inputs input, .meta-inputs select {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            box-sizing: border-box;
+            font-size: 0.9rem;
+        }
+        .full-width {
+            grid-column: span 2;
+        }
+        .status-bar {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 10px;
+            background: #f1f3f5;
+            border-radius: 6px;
+            margin-bottom: 20px;
+            font-size: 0.85rem;
+            font-weight: 500;
+        }
+        .indicator {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            background: #ccc;
+            display: inline-block;
+            margin-right: 5px;
+        }
+        .indicator.active {
+            background: #2b8a3e;
+            animation: pulse 1.5s infinite;
+        }
+        @keyframes pulse {
+            0% { opacity: 0.4; }
+            50% { opacity: 1; }
+            100% { opacity: 0.4; }
+        }
+        .controls {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
+        }
+        button {
+            flex: 1;
+            padding: 14px;
+            border: none;
+            border-radius: 8px;
+            font-size: 1rem;
+            font-weight: bold;
+            cursor: pointer;
+            transition: opacity 0.2s;
+        }
+        button:active {
+            opacity: 0.8;
+        }
+        .btn-start {
+            background-color: var(--primary);
+            color: white;
+        }
+        .btn-stop {
+            background-color: var(--danger);
+            color: white;
+            display: none;
+        }
+        .btn-copy {
+            background-color: #495057;
+            color: white;
+            width: 100%;
+            margin-top: 10px;
+        }
+        .output-box {
+            width: 100%;
+            height: 220px;
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 12px;
+            box-sizing: border-box;
+            resize: none;
+            font-size: 0.95rem;
+            line-height: 1.4;
+            background-color: #fafafa;
+        }
+        .toast {
+            position: fixed;
+            bottom: 20px;
+            background: rgba(0,0,0,0.8);
+            color: white;
+            padding: 10px 20px;
+            border-radius: 20px;
+            font-size: 0.85rem;
+            opacity: 0;
+            transition: opacity 0.3s;
+            pointer-events: none;
+        }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h2>Silent Appointment Scribe</h2>
+    
+    <div class="meta-inputs">
+        <input type="text" id="studentName" placeholder="Student / Alum Name" required>
+        <select id="studentYear">
+            <option value="Freshman">Freshman</option>
+            <option value="Sophomore">Sophomore</option>
+            <option value="Junior">Junior</option>
+            <option value="Senior">Senior</option>
+            <option value="Alumni">Alumni</option>
+        </select>
+        <input type="text" id="studentMajor" class="full-width" placeholder="Major (e.g., Economics, Psychology)">
+    </div>
+
+    <div class="status-bar">
+        <span>Status: <span id="statusText">Idle</span></span>
+        <div><span id="liveIndicator" class="indicator"></span><span id="duration">00:00</span></div>
+    </div>
+
+    <div class="controls">
+        <button id="startBtn" class="btn-start" onclick="startScribe()">Start Recording (Silent)</button>
+        <button id="stopBtn" class="btn-stop" onclick="stopScribe()">Stop & Generate Note</button>
+    </div>
+
+    <textarea id="outputTextArea" class="output-box" placeholder="Your formatted appointment narrative note will appear here..." readonly></textarea>
+    <button id="copyBtn" class="btn-copy" onclick="copyToClipboard()">Copy Note to Clipboard</button>
+</div>
+
+<div id="toast" class="toast">Copied to clipboard!</div>
+
+<script>
+    let recognition;
+    let isRecording = false;
+    let finalTranscript = '';
+    let startTime;
+    let timerInterval;
+
+    // Fixed Hashtags mapping framework from guidelines
+    const hashtagKeywords = {
+        'explore': '#careerexploration',
+        'major': '#majorselection',
+        'resume': '#resumereview',
+        'cover letter': '#coverletter',
+        'cv': '#cvwriting',
+        'internship': '#internshipsearch',
+        'job': '#jobsearch',
+        'cpt': '#cpt',
+        'opt': '#opt',
+        'visa': '#workauthorization',
+        'interview': '#interviewprep',
+        'network': '#networking'
+    };
+
+    if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
+        const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+        recognition = new SpeechRecognition();
+        recognition.continuous = true;
+        recognition.interimResults = false;
+        recognition.lang = 'en-US';
+
+        recognition.onresult = (event) => {
+            let currentText = '';
+            for (let i = event.resultIndex; i < event.results.length; ++i) {
+                if (event.results[i].isFinal) {
+                    currentText += event.results[i][0].transcript + ' ';
+                }
+            }
+            finalTranscript += currentText;
+            // Background buffer update without intrusive sounds
+            document.getElementById('outputTextArea').value = "Recording live content text... \n\nTemporary Buffer: " + finalTranscript;
+        };
+
+        recognition.onerror = (event) => {
+            if (event.error === 'no-speech') return;
+            console.error("Speech recognition error", event.error);
+        };
+
+        recognition.onend = () => {
+            // Keep-alive loop for 45-60 minute long duration context processing
+            if (isRecording) {
+                recognition.start();
+            }
+        };
+    } else {
+        alert("Web Speech API is not supported on this browser browser version. Please use Google Chrome or Samsung Internet.");
+    }
+
+    function startScribe() {
+        if (!recognition) return;
+        
+        // Ensure user interface updates are zero-noise
+        isRecording = true;
+        finalTranscript = '';
+        document.getElementById('outputTextArea').value = '';
+        
+        document.getElementById('startBtn').style.display = 'none';
+        document.getElementById('stopBtn').style.display = 'block';
+        document.getElementById('liveIndicator').classList.add('active');
+        document.getElementById('statusText').innerText = 'Scribing...';
+        
+        startTime = Date.now();
+        timerInterval = setInterval(updateTimer, 1000);
+
+        recognition.start();
+    }
+
+    function stopScribe() {
+        isRecording = false;
+        recognition.stop();
+        clearInterval(timerInterval);
+
+        document.getElementById('startBtn').style.display = 'block';
+        document.getElementById('stopBtn').style.display = 'none';
+        document.getElementById('liveIndicator').classList.remove('active');
+        document.getElementById('statusText').innerText = 'Processing...';
+
+        formatAppointmentNote();
+    }
+
+    function updateTimer() {
+        const elapsed = Date.now() - startTime;
+        const totalSeconds = Math.floor(elapsed / 1000);
+        const mins = String(Math.floor(totalSeconds / 60)).padStart(2, '0');
+        const secs = String(totalSeconds % 60).padStart(2, '0');
+        document.getElementById('duration').innerText = `${mins}:${secs}`;
+    }
+
+    function formatAppointmentNote() {
+        const name = document.getElementById('studentName').value || 'The student';
+        const year = document.getElementById('studentYear').value;
+        const major = document.getElementById('studentMajor').value || '[Major]';
+        
+        if (finalTranscript.trim() === '') {
+            document.getElementById('outputTextArea').value = "No text captured. Ensure microphone permissions are active.";
+            document.getElementById('statusText').innerText = 'Idle';
+            return;
+        }
+
+        // Processing narrative transformation simulating professional structure instructions
+        let formattedText = `${name}, a ${major} major in the ${year.toLowerCase()} class, met to discuss their professional development. `;
+        
+        // Split raw input into sentences for filtering clean prose
+        let rawSentences = finalTranscript.split(/[.!?]+/);
+        let validLines = [];
+
+        rawSentences.forEach(sentence => {
+            let clean = sentence.trim();
+            if (clean.length > 8) {
+                // Formatting clean professional third-person perspective conversions
+                clean = clean.replace(/\bI wanted\b/gi, `${name} expressed interest`);
+                clean = clean.replace(/\bI need\b/gi, `${name} is seeking`);
+                validLines.push(clean);
+            }
+        });
+
+        if (validLines.length > 0) {
+            formattedText += validLines.join('. ') + '.';
+        } else {
+            formattedText += "During the appointment, we explored targeted career strategies and implementation goals tailored to their field.";
+        }
+
+        // Append explicit context tags cleanly at the end
+        let matchedTags = [];
+        const lowerTranscript = finalTranscript.toLowerCase();
+        for (const [key, tag] of Object.entries(hashtagKeywords)) {
+            if (lowerTranscript.includes(key)) {
+                matchedTags.push(tag);
+            }
+        }
+
+        if (matchedTags.length > 0) {
+            formattedText += "\n\n" + matchedTags.join(' ');
+        } else {
+            formattedText += "\n\n#careerexploration #actionplan";
+        }
+
+        document.getElementById('outputTextArea').value = formattedText;
+        document.getElementById('statusText').innerText = 'Note Generated';
+    }
+
+    function copyToClipboard() {
+        const copyText = document.getElementById('outputTextArea');
+        copyText.select();
+        copyText.setSelectionRange(0, 99999);
+        navigator.clipboard.writeText(copyText.value);
+
+        const toast = document.getElementById('toast');
+        toast.style.opacity = '1';
+        setTimeout(() => { toast.style.opacity = '0'; }, 2000);
+    }
+</script>
+
+</body>
+</html>
