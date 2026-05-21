@@ -249,11 +249,11 @@
     <div class="meta-grid">
         <div class="form-group">
             <label for="studentName">Student Preferred Name</label>
-            <input type="text" id="studentName" placeholder="e.g., Cecilia">
+            <input type="text" id="studentName" placeholder="e.g., Alex">
         </div>
         <div class="form-group">
             <label for="studentMajor">Major / Intended Major</label>
-            <input type="text" id="studentMajor" placeholder="e.g., Psychology">
+            <input type="text" id="studentMajor" placeholder="e.g., Economics">
         </div>
         <div class="form-group">
             <label for="classYear">Class Year</label>
@@ -268,7 +268,7 @@
         </div>
         <div class="form-group">
             <label for="apptType">Appointment Type</label>
-            <input type="text" id="apptType" placeholder="e.g., TD - Career Exploration">
+            <input type="text" id="apptType" placeholder="e.g., BE - Job Search Strategy">
         </div>
     </div>
     
@@ -322,7 +322,6 @@
     let finalTranscript = '';
     let selectedTags = new Set();
 
-    // Element Registry Linkages
     const startBtn = document.getElementById('startBtn');
     const pauseBtn = document.getElementById('pauseBtn');
     const resumeBtn = document.getElementById('resumeBtn');
@@ -341,12 +340,10 @@
     const copyNoteBtn = document.getElementById('copyNoteBtn');
     const tagCloud = document.getElementById('tagCloud');
 
-    // Real-time text listening parameters for dynamic string cleaning
     [studentName, studentMajor, classYear, apptType, transcriptBox].forEach(element => {
         element.addEventListener('input', processObservationNoteText);
     });
 
-    // Handle interactive hashtag toggles
     tagCloud.addEventListener('click', (e) => {
         if (e.target.classList.contains('tag-btn')) {
             const tag = e.target.getAttribute('data-tag');
@@ -361,7 +358,6 @@
         }
     });
 
-    // Web Speech API Engine Initialization Parameters
     if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
         const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
         recognition = new SpeechRecognition();
@@ -401,7 +397,6 @@
         statusText.innerText = "Local browser lacks speech parameters compatibility.";
     }
 
-    // Capture Loop Controls
     startBtn.addEventListener('click', () => {
         finalTranscript = '';
         transcriptBox.value = '';
@@ -451,7 +446,6 @@
         processObservationNoteText();
     });
 
-    // Clean text processing transformation framework
     function processObservationNoteText() {
         const name = studentName.value.trim() || "[Student Preferred Name]";
         const major = studentMajor.value.trim() || "[Major]";
@@ -463,7 +457,7 @@
             return;
         }
 
-        // 1. Structural Regex Pass: Remove standard filler vocal phrasing overhead
+        // Structural Filtration Pass: Remove spoken conversation redundancies entirely dynamically
         let cleanPhrasing = rawText
             .replace(/\b(ok so|okay so|so basically|pretty good discussion regarding|returned today to have some discussion regarding)\b/gi, "")
             .replace(/\b(i want to make sure that even though i pause the microphone doesn't suddenly stop|the microphone doesn't suddenly stop)\b/gi, "")
@@ -471,20 +465,19 @@
             .replace(/\s+/g, " ")
             .trim();
 
-        // Capitalize sentences cleanly
+        // Standard prose sentence capitalization rules
         cleanPhrasing = cleanPhrasing.charAt(0).toUpperCase() + cleanPhrasing.slice(1);
         cleanPhrasing = cleanPhrasing.replace(/\.\s*([a-z])/g, (match, char) => `. ${char.toUpperCase()}`);
         if (cleanPhrasing && !cleanPhrasing.endsWith('.')) cleanPhrasing += '.';
 
-        // 2. Format prose structurally to merge Identity Metrics into introductory sentences
+        // Form structurally aligned introductory sentence layouts
         let refinedObservationProse = `${name}, a ${year} majoring in ${major.toLowerCase()}, met to review her progress with the ADEPT Framework. ${cleanPhrasing}`;
 
-        // Ensure proper capitalization for local structural landmarks like "Bridges" or "ADEPT"
+        // Enforce acronym formatting rules dynamically
         refinedObservationProse = refinedObservationProse
             .replace(/adept framework/gi, "ADEPT Framework")
             .replace(/\bbridges\b/gi, "Bridges");
 
-        // 3. Append compiled relevant analytical metric tags array from selected set
         if (selectedTags.size > 0) {
             const tagsString = Array.from(selectedTags).join(' ');
             refinedObservationProse += `\n\n${tagsString}`;
@@ -493,7 +486,6 @@
         cleanNoteBox.value = refinedObservationProse;
     }
 
-    // Clipboard Pipeline Logic
     copyTranscriptBtn.addEventListener('click', () => {
         navigator.clipboard.writeText(transcriptBox.value);
     });
