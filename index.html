@@ -3,338 +3,487 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Silent Client Scribe Tool</title>
+    <title>Advising Appointment Scribe & Formatter</title>
     <style>
         :root {
             --primary: #0066cc;
-            --danger: #cc3333;
-            --bg: #f8f9fa;
-            --surface: #ffffff;
+            --primary-hover: #0052a3;
+            --bg: #f4f6f9;
+            --card-bg: #ffffff;
             --text: #333333;
-            --border: #dddddd;
+            --border: #cccccc;
+            --accent-green: #2ec4b6;
+            --accent-yellow: #f1c40f;
+            --accent-red: #e74c3c;
         }
+        
         body {
             font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
             background-color: var(--bg);
             color: var(--text);
+            padding: 20px;
             margin: 0;
-            padding: 16px;
             display: flex;
-            flex-direction: column;
-            align-items: center;
+            justify-content: center;
         }
+
         .container {
             width: 100%;
-            max-width: 500px;
-            background: var(--surface);
+            max-width: 900px;
+            background: var(--card-bg);
             border-radius: 12px;
-            box-shadow: 0 4px 6px rgba(0,0,0,0.05);
-            padding: 20px;
+            box-shadow: 0 4px 10px rgba(0,0,0,0.08);
+            padding: 25px;
             box-sizing: border-box;
         }
+
         h2 {
             margin-top: 0;
-            font-size: 1.4rem;
+            font-size: 1.6rem;
+            color: #111;
             text-align: center;
-            color: #222;
+            border-bottom: 2px solid var(--bg);
+            padding-bottom: 12px;
         }
-        .meta-inputs {
+
+        .meta-grid {
             display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 10px;
-            margin-bottom: 15px;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+            margin-bottom: 20px;
+            background: #fafafa;
+            padding: 15px;
+            border-radius: 8px;
+            border: 1px solid var(--border);
         }
-        .meta-inputs input, .meta-inputs select {
-            width: 100%;
+
+        .form-group {
+            display: flex;
+            flex-direction: column;
+        }
+
+        label {
+            font-weight: 600;
+            font-size: 0.85rem;
+            margin-bottom: 5px;
+            color: #444;
+        }
+
+        input, select {
             padding: 10px;
             border: 1px solid var(--border);
             border-radius: 6px;
-            box-sizing: border-box;
-            font-size: 0.9rem;
+            font-size: 0.95rem;
+            font-family: inherit;
         }
-        .full-width {
-            grid-column: span 2;
+
+        input:focus, select:focus {
+            outline: none;
+            border-color: var(--primary);
         }
-        .status-bar {
+
+        .status-container {
             display: flex;
-            justify-content: space-between;
             align-items: center;
-            padding: 10px;
-            background: #f1f3f5;
-            border-radius: 6px;
-            margin-bottom: 20px;
-            font-size: 0.85rem;
-            font-weight: 500;
+            justify-content: center;
+            margin: 15px 0;
+            font-weight: 600;
+            font-size: 1.05rem;
         }
+
         .indicator {
-            width: 10px;
-            height: 10px;
+            width: 12px;
+            height: 12px;
             border-radius: 50%;
-            background: #ccc;
+            background-color: #ff3b30;
+            margin-right: 8px;
             display: inline-block;
-            margin-right: 5px;
         }
+
         .indicator.active {
-            background: #2b8a3e;
+            background-color: var(--accent-green);
+            box-shadow: 0 0 8px var(--accent-green);
             animation: pulse 1.5s infinite;
         }
-        @keyframes pulse {
-            0% { opacity: 0.4; }
-            50% { opacity: 1; }
-            100% { opacity: 0.4; }
+
+        .indicator.paused {
+            background-color: var(--accent-yellow);
+            box-shadow: 0 0 8px var(--accent-yellow);
+            animation: none;
         }
-        .controls {
-            display: flex;
+
+        @keyframes pulse {
+            0% { opacity: 1; }
+            50% { opacity: 0.4; }
+            100% { opacity: 1; }
+        }
+
+        .control-panel {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
             gap: 10px;
             margin-bottom: 20px;
         }
-        button {
-            flex: 1;
+
+        .btn {
             padding: 14px;
             border: none;
             border-radius: 8px;
             font-size: 1rem;
             font-weight: bold;
             cursor: pointer;
-            transition: opacity 0.2s;
+            transition: all 0.2s ease;
+            text-align: center;
+            box-sizing: border-box;
         }
-        button:active {
-            opacity: 0.8;
+
+        .btn-start { background-color: var(--primary); color: white; }
+        .btn-start:hover { background-color: var(--primary-hover); }
+
+        .btn-pause { background-color: var(--accent-yellow); color: #333; display: none; }
+        .btn-pause:hover { background-color: #dbb20a; }
+
+        .btn-resume { background-color: var(--accent-green); color: white; display: none; }
+        .btn-resume:hover { background-color: #249b8f; }
+
+        .btn-stop { background-color: #222222; color: white; display: none; }
+        .btn-stop:hover { background-color: #111111; }
+
+        .workspace {
+            display: grid;
+            grid-template-columns: 1fr;
+            gap: 20px;
+            margin-top: 15px;
         }
-        .btn-start {
-            background-color: var(--primary);
-            color: white;
+
+        @media (min-width: 768px) {
+            .workspace {
+                grid-template-columns: 1fr 1fr;
+            }
         }
-        .btn-stop {
-            background-color: var(--danger);
-            color: white;
-            display: none;
+
+        .panel {
+            display: flex;
+            flex-direction: column;
         }
-        .btn-copy {
-            background-color: #495057;
-            color: white;
+
+        textarea {
             width: 100%;
-            margin-top: 10px;
-        }
-        .output-box {
-            width: 100%;
-            height: 220px;
+            height: 300px;
+            padding: 12px;
             border: 1px solid var(--border);
             border-radius: 8px;
-            padding: 12px;
-            box-sizing: border-box;
-            resize: none;
             font-size: 0.95rem;
-            line-height: 1.4;
+            resize: vertical;
+            box-sizing: border-box;
             background-color: #fafafa;
+            font-family: inherit;
+            line-height: 1.4;
         }
-        .toast {
-            position: fixed;
-            bottom: 20px;
-            background: rgba(0,0,0,0.8);
-            color: white;
-            padding: 10px 20px;
-            border-radius: 20px;
-            font-size: 0.85rem;
-            opacity: 0;
-            transition: opacity 0.3s;
-            pointer-events: none;
+
+        textarea:focus {
+            outline: none;
+            border-color: var(--primary);
+            background-color: #ffffff;
         }
+
+        .btn-action {
+            background-color: #e2e8f0;
+            color: #1a202c;
+            border: 1px solid var(--border);
+            margin-top: 10px;
+        }
+        .btn-action:active { background-color: #cbd5e1; }
+
+        .prompt-box {
+            background-color: #eff6ff;
+            border: 1px dashed #3b82f6;
+            border-radius: 8px;
+            padding: 15px;
+            margin-top: 20px;
+            font-size: 0.9rem;
+            line-height: 1.5;
+        }
+
+        .prompt-header {
+            font-weight: bold;
+            color: #1d4ed8;
+            margin-bottom: 8px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .hidden { display: none !important; }
     </style>
 </head>
 <body>
 
 <div class="container">
-    <h2>Silent Appointment Scribe</h2>
+    <h2>Advising Appointment Scribe & Prompt Generator</h2>
     
-    <div class="meta-inputs">
-        <input type="text" id="studentName" placeholder="Student / Alum Name" required>
-        <select id="studentYear">
-            <option value="Freshman">Freshman</option>
-            <option value="Sophomore">Sophomore</option>
-            <option value="Junior">Junior</option>
-            <option value="Senior">Senior</option>
-            <option value="Alumni">Alumni</option>
-        </select>
-        <input type="text" id="studentMajor" class="full-width" placeholder="Major (e.g., Economics, Psychology)">
+    <div class="meta-grid">
+        <div class="form-group">
+            <label for="studentName">Student Preferred Name</label>
+            <input type="text" id="studentName" placeholder="e.g., Jane Doe">
+        </div>
+        <div class="form-group">
+            <label for="studentMajor">Major / Intended Major</label>
+            <input type="text" id="studentMajor" placeholder="e.g., Computer Science">
+        </div>
+        <div class="form-group">
+            <label for="classYear">Class Year</label>
+            <select id="classYear">
+                <option value="">Select Year...</option>
+                <option value="Freshman">Freshman</option>
+                <option value="Sophomore">Sophomore</option>
+                <option value="Junior">Junior</option>
+                <option value="Senior">Senior</option>
+                <option value="Alumni">Alumni</option>
+            </select>
+        </div>
+        <div class="form-group">
+            <label for="apptType">Appointment Type</label>
+            <input type="text" id="apptType" placeholder="e.g., TD - Career Exploration">
+        </div>
+    </div>
+    
+    <div class="status-container">
+        <span id="statusIndicator" class="indicator"></span>
+        <span id="statusText">System Idle</span>
     </div>
 
-    <div class="status-bar">
-        <span>Status: <span id="statusText">Idle</span></span>
-        <div><span id="liveIndicator" class="indicator"></span><span id="duration">00:00</span></div>
+    <div class="control-panel">
+        <button id="startBtn" class="btn btn-start">Start Capture</button>
+        <button id="pauseBtn" class="btn btn-pause">Pause Session</button>
+        <button id="resumeBtn" class="btn btn-resume">Resume Session</button>
+        <button id="stopBtn" class="btn btn-stop">Stop Capture</button>
     </div>
 
-    <div class="controls">
-        <button id="startBtn" class="btn-start" onclick="startScribe()">Start Recording (Silent)</button>
-        <button id="stopBtn" class="btn-stop" onclick="stopScribe()">Stop & Generate Note</button>
+    <div class="workspace">
+        <div class="panel">
+            <label for="transcriptBox">Live Feed Stream (Raw Input Capture)</label>
+            <textarea id="transcriptBox" placeholder="Text stream will isolate here once hardware begins listening..."></textarea>
+            <button id="copyTranscriptBtn" class="btn btn-action">Copy Raw Stream</button>
+        </div>
+        
+        <div class="panel">
+            <label for="promptOutputBox">Structured AI Integration Pipeline Payload</label>
+            <textarea id="promptOutputBox" readonly placeholder="A clean payload incorporating metadata, raw transcript chunks, and your explicit structural rules updates live here..."></textarea>
+            <button id="copyPromptBtn" class="btn btn-action" style="background-color: var(--primary); color: white;">Copy Formatter Payload</button>
+        </div>
     </div>
 
-    <textarea id="outputTextArea" class="output-box" placeholder="Your formatted appointment narrative note will appear here..." readonly></textarea>
-    <button id="copyBtn" class="btn-copy" onclick="copyToClipboard()">Copy Note to Clipboard</button>
+    <div class="prompt-box">
+        <div class="prompt-header">
+            <span>Pipeline Protocol Execution Instructions</span>
+        </div>
+        Once your session finishes, click the highlighted <strong>"Copy Formatter Payload"</strong> button. Paste that text directly into your favorite advanced LLM window (like <strong>Gemini 1.5 Pro</strong>). The model will consume the structured formatting command alongside your context files to return a flawless, publication-grade record instantly.
+    </div>
 </div>
-
-<div id="toast" class="toast">Copied to clipboard!</div>
 
 <script>
     let recognition;
     let isRecording = false;
+    let isPaused = false;
     let finalTranscript = '';
-    let startTime;
-    let timerInterval;
 
-    // Fixed Hashtags mapping framework from guidelines
-    const hashtagKeywords = {
-        'explore': '#careerexploration',
-        'major': '#majorselection',
-        'resume': '#resumereview',
-        'cover letter': '#coverletter',
-        'cv': '#cvwriting',
-        'internship': '#internshipsearch',
-        'job': '#jobsearch',
-        'cpt': '#cpt',
-        'opt': '#opt',
-        'visa': '#workauthorization',
-        'interview': '#interviewprep',
-        'network': '#networking'
-    };
+    // Element Registry Linkages
+    const startBtn = document.getElementById('startBtn');
+    const pauseBtn = document.getElementById('pauseBtn');
+    const resumeBtn = document.getElementById('resumeBtn');
+    const stopBtn = document.getElementById('stopBtn');
+    const statusIndicator = document.getElementById('statusIndicator');
+    const statusText = document.getElementById('statusText');
+    const transcriptBox = document.getElementById('transcriptBox');
+    const promptOutputBox = document.getElementById('promptOutputBox');
+    
+    const studentName = document.getElementById('studentName');
+    const studentMajor = document.getElementById('studentMajor');
+    const classYear = document.getElementById('classYear');
+    const apptType = document.getElementById('apptType');
 
+    const copyTranscriptBtn = document.getElementById('copyTranscriptBtn');
+    const copyPromptBtn = document.getElementById('copyPromptBtn');
+
+    // Input monitoring framework to facilitate real-time structural prompt alignment
+    [studentName, studentMajor, classYear, apptType, transcriptBox].forEach(element => {
+        element.addEventListener('input', updateSystemPayloadField);
+    });
+
+    // Web Speech API Engine Initialization Parameters
     if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
         const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
         recognition = new SpeechRecognition();
+        
         recognition.continuous = true;
         recognition.interimResults = false;
         recognition.lang = 'en-US';
 
-        recognition.onresult = (event) => {
-            let currentText = '';
-            for (let i = event.resultIndex; i < event.results.length; ++i) {
-                if (event.results[i].isFinal) {
-                    currentText += event.results[i][0].transcript + ' ';
-                }
+        recognition.onstart = () => {
+            if (!isPaused) {
+                statusIndicator.className = 'indicator active';
+                statusText.innerText = "Listening actively...";
             }
-            finalTranscript += currentText;
-            // Background buffer update without intrusive sounds
-            document.getElementById('outputTextArea').value = "Recording live content text... \n\nTemporary Buffer: " + finalTranscript;
         };
 
         recognition.onerror = (event) => {
-            if (event.error === 'no-speech') return;
-            console.error("Speech recognition error", event.error);
+            console.error("Speech Recognition System Error Event Logged: ", event.error);
+            if (event.error === 'not-allowed') {
+                statusText.innerText = "Hardware Block: System permission parameter denied.";
+                resetSystemDeck();
+            }
         };
 
         recognition.onend = () => {
-            // Keep-alive loop for 45-60 minute long duration context processing
-            if (isRecording) {
+            // Self-healing block to prevent script execution fallout over long silent patches
+            if (isRecording && !isPaused) {
                 recognition.start();
             }
         };
+
+        recognition.onresult = (event) => {
+            for (let i = event.resultIndex; i < event.results.length; ++i) {
+                if (event.results[i].isFinal) {
+                    finalTranscript += event.results[i][0].transcript + ' ';
+                }
+            }
+            transcriptBox.value = finalTranscript.trim();
+            updateSystemPayloadField();
+        };
     } else {
-        alert("Web Speech API is not supported on this browser browser version. Please use Google Chrome or Samsung Internet.");
+        startBtn.disabled = true;
+        statusText.innerText = "Fatal: Local browser engine lacking speech parameters lookup compatibility.";
     }
 
-    function startScribe() {
-        if (!recognition) return;
-        
-        // Ensure user interface updates are zero-noise
-        isRecording = true;
+    // Command Input Interactions Deck
+    startBtn.addEventListener('click', () => {
         finalTranscript = '';
-        document.getElementById('outputTextArea').value = '';
+        transcriptBox.value = '';
+        isRecording = true;
+        isPaused = false;
         
-        document.getElementById('startBtn').style.display = 'none';
-        document.getElementById('stopBtn').style.display = 'block';
-        document.getElementById('liveIndicator').classList.add('active');
-        document.getElementById('statusText').innerText = 'Scribing...';
-        
-        startTime = Date.now();
-        timerInterval = setInterval(updateTimer, 1000);
-
         recognition.start();
-    }
+        
+        startBtn.style.display = 'none';
+        pauseBtn.style.display = 'inline-block';
+        resumeBtn.style.display = 'none';
+        stopBtn.style.display = 'inline-block';
+        updateSystemPayloadField();
+    });
 
-    function stopScribe() {
+    pauseBtn.addEventListener('click', () => {
+        if (isRecording && !isPaused) {
+            isPaused = true;
+            recognition.stop();
+            statusIndicator.className = 'indicator paused';
+            statusText.innerText = "Hardware feed paused.";
+            pauseBtn.style.display = 'none';
+            resumeBtn.style.display = 'inline-block';
+        }
+    });
+
+    resumeBtn.addEventListener('click', () => {
+        if (isRecording && isPaused) {
+            isPaused = false;
+            recognition.start();
+            statusIndicator.className = 'indicator active';
+            statusText.innerText = "Listening actively...";
+            resumeBtn.style.display = 'none';
+            pauseBtn.style.display = 'inline-block';
+        }
+    });
+
+    stopBtn.addEventListener('click', () => {
         isRecording = false;
+        isPaused = false;
         recognition.stop();
-        clearInterval(timerInterval);
+        resetSystemDeck();
+        statusIndicator.className = 'indicator';
+        statusText.innerText = "System Idle";
+        updateSystemPayloadField();
+    });
 
-        document.getElementById('startBtn').style.display = 'block';
-        document.getElementById('stopBtn').style.display = 'none';
-        document.getElementById('liveIndicator').classList.remove('active');
-        document.getElementById('statusText').innerText = 'Processing...';
-
-        formatAppointmentNote();
+    // Helper to revert button configuration frames
+    function resetSystemDeck() {
+        startBtn.style.display = 'inline-block';
+        pauseBtn.style.display = 'none';
+        resumeBtn.style.display = 'none';
+        stopBtn.style.display = 'none';
     }
 
-    function updateTimer() {
-        const elapsed = Date.now() - startTime;
-        const totalSeconds = Math.floor(elapsed / 1000);
-        const mins = String(Math.floor(totalSeconds / 60)).padStart(2, '0');
-        const secs = String(totalSeconds % 60).padStart(2, '0');
-        document.getElementById('duration').innerText = `${mins}:${secs}`;
+    // Main text composition structural pipeline to align template variables
+    function updateSystemPayloadField() {
+        const name = studentName.value.trim() || "[Student's Name]";
+        const major = studentMajor.value.trim() || "[Major]";
+        const year = classYear.value || "[Year]";
+        const type = apptType.value.trim() || "[Appointment Type]";
+        const rawFeedText = transcriptBox.value.trim() || "[Waiting for session audio feed content injection...]";
+
+        // Structured execution block built directly from core notebook templates layout logic
+        const formattedPayloadTemplate = 
+`[SYSTEM COMMAND PIPELINE PROTOCOL]
+
+Please execute the following assignment exactly as specified by the foundational guidelines located in your local reference documents.
+
+1. ACTION REQUIRED:
+Generate an appointment observation note based on the raw session transcription captured below. Clean up grammatical fragment overhead, remove conversational redundancies, filter filler linguistics, and structure the content into an academic observation format.
+
+2. SYSTEM BOUNDARY CONDITIONS (CRITICAL):
+- Use the 'Exemplary Appointment Notes' and 'Sample Appointment Observations' source files inside your notebook framework as structural rubrics.
+- Keep the narrative objective and strictly factual. Do not inject secondary validation, subjective interpretation, or emotional commentary.
+- Do not separate the student's identity variables (Major and Class Year) from the body paragraph layout framework; these metrics must be naturally woven together into the introductory lines of the narrative.
+- Render the text as clear, flowing prose in block paragraph form. Do not output simple bulleted outlines.
+- cross-reference acronym definitions against your source variables lookup indices where applicable.
+- Append analytical relevance tag metrics strictly chosen from the predefined index parameters documented within 'Career_Advising_Hashtags_and_Instructions.pdf'. Do not alter structural spellings or invent loose custom configurations.
+
+3. INTAKE INGESTION RECORDS:
+- Student Name: ${name}
+- Academic Area of Focus: ${major}
+- Structural Class Cohort: ${year}
+- Categorical Appointment Alignment: ${type}
+
+4. RAW DATA STREAM TRANSCIPTION CHUNK:
+"""
+${rawFeedText}
+"""
+
+[EXECUTE TRANSFORMATION NOW - RESPOND ONLY WITH CLEAN PARAGRAPH OBSERVATION OUTPUT AND HASHTAGS SELECTION]`;
+
+        promptOutputBox.value = formattedPayloadTemplate;
     }
 
-    function formatAppointmentNote() {
-        const name = document.getElementById('studentName').value || 'The student';
-        const year = document.getElementById('studentYear').value;
-        const major = document.getElementById('studentMajor').value || '[Major]';
-        
-        if (finalTranscript.trim() === '') {
-            document.getElementById('outputTextArea').value = "No text captured. Ensure microphone permissions are active.";
-            document.getElementById('statusText').innerText = 'Idle';
-            return;
-        }
+    // Clipboard Routing Drivers
+    copyTranscriptBtn.addEventListener('click', () => {
+        executeClipboardPipeline(transcriptBox, copyTranscriptBtn, "Raw content copied!");
+    });
 
-        // Processing narrative transformation simulating professional structure instructions
-        let formattedText = `${name}, a ${major} major in the ${year.toLowerCase()} class, met to discuss their professional development. `;
-        
-        // Split raw input into sentences for filtering clean prose
-        let rawSentences = finalTranscript.split(/[.!?]+/);
-        let validLines = [];
+    copyPromptBtn.addEventListener('click', () => {
+        executeClipboardPipeline(promptOutputBox, copyPromptBtn, "Payload secured to clipboard!");
+    });
 
-        rawSentences.forEach(sentence => {
-            let clean = sentence.trim();
-            if (clean.length > 8) {
-                // Formatting clean professional third-person perspective conversions
-                clean = clean.replace(/\bI wanted\b/gi, `${name} expressed interest`);
-                clean = clean.replace(/\bI need\b/gi, `${name} is seeking`);
-                validLines.push(clean);
-            }
+    function executeClipboardPipeline(targetElement, actionButtonInstance, notificationString) {
+        targetElement.select();
+        targetElement.setSelectionRange(0, 99999); // Cross-platform mobile fallback hook optimization
+        navigator.clipboard.writeText(targetElement.value).then(() => {
+            const contextTextBackup = actionButtonInstance.innerText;
+            actionButtonInstance.innerText = notificationString;
+            actionButtonInstance.style.backgroundColor = "#2ec4b6";
+            actionButtonInstance.style.color = "white";
+            setTimeout(() => {
+                actionButtonInstance.innerText = contextTextBackup;
+                if(actionButtonInstance.id === 'copyPromptBtn') {
+                    actionButtonInstance.style.backgroundColor = "var(--primary)";
+                } else {
+                    actionButtonInstance.style.backgroundColor = "#e2e8f0";
+                    actionButtonInstance.style.color = "#1a202c";
+                }
+            }, 2500);
         });
-
-        if (validLines.length > 0) {
-            formattedText += validLines.join('. ') + '.';
-        } else {
-            formattedText += "During the appointment, we explored targeted career strategies and implementation goals tailored to their field.";
-        }
-
-        // Append explicit context tags cleanly at the end
-        let matchedTags = [];
-        const lowerTranscript = finalTranscript.toLowerCase();
-        for (const [key, tag] of Object.entries(hashtagKeywords)) {
-            if (lowerTranscript.includes(key)) {
-                matchedTags.push(tag);
-            }
-        }
-
-        if (matchedTags.length > 0) {
-            formattedText += "\n\n" + matchedTags.join(' ');
-        } else {
-            formattedText += "\n\n#careerexploration #actionplan";
-        }
-
-        document.getElementById('outputTextArea').value = formattedText;
-        document.getElementById('statusText').innerText = 'Note Generated';
     }
 
-    function copyToClipboard() {
-        const copyText = document.getElementById('outputTextArea');
-        copyText.select();
-        copyText.setSelectionRange(0, 99999);
-        navigator.clipboard.writeText(copyText.value);
-
-        const toast = document.getElementById('toast');
-        toast.style.opacity = '1';
-        setTimeout(() => { toast.style.opacity = '0'; }, 2000);
-    }
+    // Run basic initialize configuration loop step on render pass
+    updateSystemPayloadField();
 </script>
 
 </body>
