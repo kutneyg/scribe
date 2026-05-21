@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Advising Appointment Scribe & Formatter</title>
+    <title>Advising Appointment Scribe & Ingestion Preparer</title>
     <style>
         :root {
             --primary: #0066cc;
@@ -169,7 +169,7 @@
 
         textarea {
             width: 100%;
-            height: 320px;
+            height: 340px;
             padding: 12px;
             border: 1px solid var(--border);
             border-radius: 8px;
@@ -244,16 +244,16 @@
 <body>
 
 <div class="container">
-    <h2>Advising Appointment Observation Formatter</h2>
+    <h2>Advising Appointment Scribe & Ingestion Preparer</h2>
     
     <div class="meta-grid">
         <div class="form-group">
             <label for="studentName">Student Preferred Name</label>
-            <input type="text" id="studentName" placeholder="e.g., Alex">
+            <input type="text" id="studentName" placeholder="e.g., Casey">
         </div>
         <div class="form-group">
             <label for="studentMajor">Major / Intended Major</label>
-            <input type="text" id="studentMajor" placeholder="e.g., Economics">
+            <input type="text" id="studentMajor" placeholder="e.g., Psychology">
         </div>
         <div class="form-group">
             <label for="classYear">Class Year</label>
@@ -268,7 +268,7 @@
         </div>
         <div class="form-group">
             <label for="apptType">Appointment Type</label>
-            <input type="text" id="apptType" placeholder="e.g., BE - Job Search Strategy">
+            <input type="text" id="apptType" placeholder="e.g., TD - Career Exploration">
         </div>
     </div>
     
@@ -286,15 +286,15 @@
 
     <div class="workspace">
         <div class="panel">
-            <label for="transcriptBox">Live Feed Stream (Raw Microphone Input)</label>
+            <label for="transcriptBox">Live Feed Stream (Raw Continuous Capture)</label>
             <textarea id="transcriptBox" placeholder="Text stream will isolate here once hardware begins listening..."></textarea>
             <button id="copyTranscriptBtn" class="btn btn-action">Copy Raw Stream</button>
         </div>
         
         <div class="panel">
-            <label for="cleanNoteBox">Refined Appointment Observation Note</label>
-            <textarea id="cleanNoteBox" placeholder="Your clean narrative text block will auto-generate here..."></textarea>
-            <button id="copyNoteBtn" class="btn btn-action" style="background-color: var(--primary); color: white;">Copy Refined Note</button>
+            <label for="cleanNoteBox">Formatted AI Ingestion Payload Pack</label>
+            <textarea id="cleanNoteBox" placeholder="The structured workspace execution block will update here..."></textarea>
+            <button id="copyNoteBtn" class="btn btn-action" style="background-color: var(--primary); color: white;">Copy Prompt Payload</button>
         </div>
     </div>
 
@@ -341,7 +341,7 @@
     const tagCloud = document.getElementById('tagCloud');
 
     [studentName, studentMajor, classYear, apptType, transcriptBox].forEach(element => {
-        element.addEventListener('input', processObservationNoteText);
+        element.addEventListener('input', generateIngestionPayload);
     });
 
     tagCloud.addEventListener('click', (e) => {
@@ -354,7 +354,7 @@
                 selectedTags.add(tag);
                 e.target.classList.add('selected');
             }
-            processObservationNoteText();
+            generateIngestionPayload();
         }
     });
 
@@ -390,13 +390,14 @@
                 }
             }
             transcriptBox.value = finalTranscript.trim();
-            processObservationNoteText();
+            generateIngestionPayload();
         };
     } else {
         startBtn.disabled = true;
         statusText.innerText = "Local browser lacks speech parameters compatibility.";
     }
 
+    // Capture Loop State Triggers (Pause/Stop Fully Wrapped Back In)
     startBtn.addEventListener('click', () => {
         finalTranscript = '';
         transcriptBox.value = '';
@@ -408,7 +409,7 @@
         pauseBtn.style.display = 'inline-block';
         resumeBtn.style.display = 'none';
         stopBtn.style.display = 'inline-block';
-        processObservationNoteText();
+        generateIngestionPayload();
     });
 
     pauseBtn.addEventListener('click', () => {
@@ -443,47 +444,35 @@
         stopBtn.style.display = 'none';
         statusIndicator.className = 'indicator';
         statusText.innerText = "System Idle";
-        processObservationNoteText();
+        generateIngestionPayload();
     });
 
-    function processObservationNoteText() {
+    // Payloads Generator formatting structural arrays
+    function generateIngestionPayload() {
         const name = studentName.value.trim() || "[Student Preferred Name]";
         const major = studentMajor.value.trim() || "[Major]";
-        const year = (classYear.value || "[Year]").toLowerCase();
+        const year = classYear.value || "[Year]";
+        const type = apptType.value.trim() || "[Appointment Type]";
         let rawText = transcriptBox.value.trim();
 
         if (!rawText) {
-            cleanNoteBox.value = "Waiting for raw conversation feed data stream input...";
+            cleanNoteBox.value = "Waiting for raw conversation feed data stream input to compile execution parameters...";
             return;
         }
 
-        // Structural Filtration Pass: Remove spoken conversation redundancies entirely dynamically
-        let cleanPhrasing = rawText
-            .replace(/\b(ok so|okay so|so basically|pretty good discussion regarding|returned today to have some discussion regarding)\b/gi, "")
-            .replace(/\b(i want to make sure that even though i pause the microphone doesn't suddenly stop|the microphone doesn't suddenly stop)\b/gi, "")
-            .replace(/\b(had discovered was that|she had completed|period)\b/gi, "")
-            .replace(/\s+/g, " ")
-            .trim();
+        const tagArray = Array.from(selectedTags);
+        const tagsString = tagArray.length > 0 ? tagArray.join(' ') : "None selected";
 
-        // Standard prose sentence capitalization rules
-        cleanPhrasing = cleanPhrasing.charAt(0).toUpperCase() + cleanPhrasing.slice(1);
-        cleanPhrasing = cleanPhrasing.replace(/\.\s*([a-z])/g, (match, char) => `. ${char.toUpperCase()}`);
-        if (cleanPhrasing && !cleanPhrasing.endsWith('.')) cleanPhrasing += '.';
+        // Automated execution prompt template wrapping logic
+        let compiledBlock = `/appointment_note\n\n`;
+        compiledBlock += `Generate an appointment observation of a career advising appointment with ${name}, a ${major} major in the ${year} class.\n\n`;
+        compiledBlock += `[CONTEXT PARAMS]\n`;
+        compiledBlock += `- Appointment Type Focus: ${type}\n`;
+        compiledBlock += `- Selected Relevance Tags: ${tagsString}\n\n`;
+        compiledBlock += `[RAW AUDIO CONVERSATION CONTEXT]\n`;
+        compiledBlock += `"${rawText}"`;
 
-        // Form structurally aligned introductory sentence layouts
-        let refinedObservationProse = `${name}, a ${year} majoring in ${major.toLowerCase()}, met to review her progress with the ADEPT Framework. ${cleanPhrasing}`;
-
-        // Enforce acronym formatting rules dynamically
-        refinedObservationProse = refinedObservationProse
-            .replace(/adept framework/gi, "ADEPT Framework")
-            .replace(/\bbridges\b/gi, "Bridges");
-
-        if (selectedTags.size > 0) {
-            const tagsString = Array.from(selectedTags).join(' ');
-            refinedObservationProse += `\n\n${tagsString}`;
-        }
-
-        cleanNoteBox.value = refinedObservationProse;
+        cleanNoteBox.value = compiledBlock;
     }
 
     copyTranscriptBtn.addEventListener('click', () => {
@@ -494,10 +483,10 @@
         navigator.clipboard.writeText(cleanNoteBox.value);
         const origColor = copyNoteBtn.style.backgroundColor;
         copyNoteBtn.style.backgroundColor = "#2ec4b6";
-        copyNoteBtn.innerText = "Note Copied!";
+        copyNoteBtn.innerText = "Payload Copied!";
         setTimeout(() => {
             copyNoteBtn.style.backgroundColor = origColor;
-            copyNoteBtn.innerText = "Copy Refined Note";
+            copyNoteBtn.innerText = "Copy Prompt Payload";
         }, 2000);
     });
 </script>
