@@ -29,7 +29,7 @@
 
         .container {
             width: 100%;
-            max-width: 900px;
+            max-width: 1000px;
             background: var(--card-bg);
             border-radius: 12px;
             box-shadow: 0 4px 10px rgba(0,0,0,0.08);
@@ -169,7 +169,7 @@
 
         textarea {
             width: 100%;
-            height: 300px;
+            height: 320px;
             padding: 12px;
             border: 1px solid var(--border);
             border-radius: 8px;
@@ -178,7 +178,7 @@
             box-sizing: border-box;
             background-color: #fafafa;
             font-family: inherit;
-            line-height: 1.4;
+            line-height: 1.5;
         }
 
         textarea:focus {
@@ -188,48 +188,72 @@
         }
 
         .btn-action {
+            padding: 12px;
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            font-weight: bold;
+            cursor: pointer;
             background-color: #e2e8f0;
             color: #1a202c;
-            border: 1px solid var(--border);
             margin-top: 10px;
+            transition: background 0.2s;
         }
-        .btn-action:active { background-color: #cbd5e1; }
+        .btn-action:hover { background-color: #cbd5e1; }
 
-        .prompt-box {
-            background-color: #eff6ff;
-            border: 1px dashed #3b82f6;
+        .hashtag-bank {
+            margin-top: 15px;
+            background: #f8fafc;
+            border: 1px solid var(--border);
             border-radius: 8px;
-            padding: 15px;
-            margin-top: 20px;
+            padding: 12px;
+        }
+
+        .hashtag-bank h4 {
+            margin: 0 0 8px 0;
             font-size: 0.9rem;
-            line-height: 1.5;
+            color: #475569;
         }
 
-        .prompt-header {
-            font-weight: bold;
-            color: #1d4ed8;
-            margin-bottom: 8px;
+        .tag-cloud {
             display: flex;
-            justify-content: space-between;
-            align-items: center;
+            flex-wrap: wrap;
+            gap: 6px;
         }
 
-        .hidden { display: none !important; }
+        .tag-btn {
+            background: #ffffff;
+            border: 1px solid #cbd5e1;
+            border-radius: 4px;
+            padding: 4px 8px;
+            font-size: 0.8rem;
+            cursor: pointer;
+            transition: all 0.15s;
+        }
+        .tag-btn:hover {
+            background: #eff6ff;
+            border-color: var(--primary);
+            color: var(--primary);
+        }
+        .tag-btn.selected {
+            background: #3b82f6;
+            color: white;
+            border-color: #2563eb;
+        }
     </style>
 </head>
 <body>
 
 <div class="container">
-    <h2>Advising Appointment Scribe & Prompt Generator</h2>
+    <h2>Advising Appointment Observation Formatter</h2>
     
     <div class="meta-grid">
         <div class="form-group">
             <label for="studentName">Student Preferred Name</label>
-            <input type="text" id="studentName" placeholder="e.g., Jane Doe">
+            <input type="text" id="studentName" placeholder="e.g., Cecilia">
         </div>
         <div class="form-group">
             <label for="studentMajor">Major / Intended Major</label>
-            <input type="text" id="studentMajor" placeholder="e.g., Computer Science">
+            <input type="text" id="studentMajor" placeholder="e.g., Psychology">
         </div>
         <div class="form-group">
             <label for="classYear">Class Year</label>
@@ -262,23 +286,32 @@
 
     <div class="workspace">
         <div class="panel">
-            <label for="transcriptBox">Live Feed Stream (Raw Input Capture)</label>
+            <label for="transcriptBox">Live Feed Stream (Raw Microphone Input)</label>
             <textarea id="transcriptBox" placeholder="Text stream will isolate here once hardware begins listening..."></textarea>
             <button id="copyTranscriptBtn" class="btn btn-action">Copy Raw Stream</button>
         </div>
         
         <div class="panel">
-            <label for="promptOutputBox">Structured AI Integration Pipeline Payload</label>
-            <textarea id="promptOutputBox" readonly placeholder="A clean payload incorporating metadata, raw transcript chunks, and your explicit structural rules updates live here..."></textarea>
-            <button id="copyPromptBtn" class="btn btn-action" style="background-color: var(--primary); color: white;">Copy Formatter Payload</button>
+            <label for="cleanNoteBox">Refined Appointment Observation Note</label>
+            <textarea id="cleanNoteBox" placeholder="Your clean narrative text block will auto-generate here..."></textarea>
+            <button id="copyNoteBtn" class="btn btn-action" style="background-color: var(--primary); color: white;">Copy Refined Note</button>
         </div>
     </div>
 
-    <div class="prompt-box">
-        <div class="prompt-header">
-            <span>Pipeline Protocol Execution Instructions</span>
+    <div class="hashtag-bank">
+        <h4>Select Relevant Advising Hashtags:</h4>
+        <div class="tag-cloud" id="tagCloud">
+            <button class="tag-btn" data-tag="#careerexploration">#careerexploration</button>
+            <button class="tag-btn" data-tag="#majorselection">#majorselection</button>
+            <button class="tag-btn" data-tag="#resumereview">#resumereview</button>
+            <button class="tag-btn" data-tag="#coverletter">#coverletter</button>
+            <button class="tag-btn" data-tag="#internshipsearch">#internshipsearch</button>
+            <button class="tag-btn" data-tag="#jobsearch">#jobsearch</button>
+            <button class="tag-btn" data-tag="#mockinterview">#mockinterview</button>
+            <button class="tag-btn" data-tag="#actionplan">#actionplan</button>
+            <button class="tag-btn" data-tag="#followup">#followup</button>
+            <button class="tag-btn" data-tag="#internationalstudents">#internationalstudents</button>
         </div>
-        Once your session finishes, click the highlighted <strong>"Copy Formatter Payload"</strong> button. Paste that text directly into your favorite advanced LLM window (like <strong>Gemini 1.5 Pro</strong>). The model will consume the structured formatting command alongside your context files to return a flawless, publication-grade record instantly.
     </div>
 </div>
 
@@ -287,6 +320,7 @@
     let isRecording = false;
     let isPaused = false;
     let finalTranscript = '';
+    let selectedTags = new Set();
 
     // Element Registry Linkages
     const startBtn = document.getElementById('startBtn');
@@ -296,7 +330,7 @@
     const statusIndicator = document.getElementById('statusIndicator');
     const statusText = document.getElementById('statusText');
     const transcriptBox = document.getElementById('transcriptBox');
-    const promptOutputBox = document.getElementById('promptOutputBox');
+    const cleanNoteBox = document.getElementById('cleanNoteBox');
     
     const studentName = document.getElementById('studentName');
     const studentMajor = document.getElementById('studentMajor');
@@ -304,11 +338,27 @@
     const apptType = document.getElementById('apptType');
 
     const copyTranscriptBtn = document.getElementById('copyTranscriptBtn');
-    const copyPromptBtn = document.getElementById('copyPromptBtn');
+    const copyNoteBtn = document.getElementById('copyNoteBtn');
+    const tagCloud = document.getElementById('tagCloud');
 
-    // Input monitoring framework to facilitate real-time structural prompt alignment
+    // Real-time text listening parameters for dynamic string cleaning
     [studentName, studentMajor, classYear, apptType, transcriptBox].forEach(element => {
-        element.addEventListener('input', updateSystemPayloadField);
+        element.addEventListener('input', processObservationNoteText);
+    });
+
+    // Handle interactive hashtag toggles
+    tagCloud.addEventListener('click', (e) => {
+        if (e.target.classList.contains('tag-btn')) {
+            const tag = e.target.getAttribute('data-tag');
+            if (selectedTags.has(tag)) {
+                selectedTags.delete(tag);
+                e.target.classList.remove('selected');
+            } else {
+                selectedTags.add(tag);
+                e.target.classList.add('selected');
+            }
+            processObservationNoteText();
+        }
     });
 
     // Web Speech API Engine Initialization Parameters
@@ -328,15 +378,10 @@
         };
 
         recognition.onerror = (event) => {
-            console.error("Speech Recognition System Error Event Logged: ", event.error);
-            if (event.error === 'not-allowed') {
-                statusText.innerText = "Hardware Block: System permission parameter denied.";
-                resetSystemDeck();
-            }
+            console.error("Speech Recognition System Error: ", event.error);
         };
 
         recognition.onend = () => {
-            // Self-healing block to prevent script execution fallout over long silent patches
             if (isRecording && !isPaused) {
                 recognition.start();
             }
@@ -349,27 +394,26 @@
                 }
             }
             transcriptBox.value = finalTranscript.trim();
-            updateSystemPayloadField();
+            processObservationNoteText();
         };
     } else {
         startBtn.disabled = true;
-        statusText.innerText = "Fatal: Local browser engine lacking speech parameters lookup compatibility.";
+        statusText.innerText = "Local browser lacks speech parameters compatibility.";
     }
 
-    // Command Input Interactions Deck
+    // Capture Loop Controls
     startBtn.addEventListener('click', () => {
         finalTranscript = '';
         transcriptBox.value = '';
         isRecording = true;
         isPaused = false;
-        
         recognition.start();
         
         startBtn.style.display = 'none';
         pauseBtn.style.display = 'inline-block';
         resumeBtn.style.display = 'none';
         stopBtn.style.display = 'inline-block';
-        updateSystemPayloadField();
+        processObservationNoteText();
     });
 
     pauseBtn.addEventListener('click', () => {
@@ -398,92 +442,72 @@
         isRecording = false;
         isPaused = false;
         recognition.stop();
-        resetSystemDeck();
-        statusIndicator.className = 'indicator';
-        statusText.innerText = "System Idle";
-        updateSystemPayloadField();
-    });
-
-    // Helper to revert button configuration frames
-    function resetSystemDeck() {
         startBtn.style.display = 'inline-block';
         pauseBtn.style.display = 'none';
         resumeBtn.style.display = 'none';
         stopBtn.style.display = 'none';
-    }
+        statusIndicator.className = 'indicator';
+        statusText.innerText = "System Idle";
+        processObservationNoteText();
+    });
 
-    // Main text composition structural pipeline to align template variables
-    function updateSystemPayloadField() {
-        const name = studentName.value.trim() || "[Student's Name]";
+    // Clean text processing transformation framework
+    function processObservationNoteText() {
+        const name = studentName.value.trim() || "[Student Preferred Name]";
         const major = studentMajor.value.trim() || "[Major]";
-        const year = classYear.value || "[Year]";
-        const type = apptType.value.trim() || "[Appointment Type]";
-        const rawFeedText = transcriptBox.value.trim() || "[Waiting for session audio feed content injection...]";
+        const year = (classYear.value || "[Year]").toLowerCase();
+        let rawText = transcriptBox.value.trim();
 
-        // Structured execution block built directly from core notebook templates layout logic
-        const formattedPayloadTemplate = 
-`[SYSTEM COMMAND PIPELINE PROTOCOL]
+        if (!rawText) {
+            cleanNoteBox.value = "Waiting for raw conversation feed data stream input...";
+            return;
+        }
 
-Please execute the following assignment exactly as specified by the foundational guidelines located in your local reference documents.
+        // 1. Structural Regex Pass: Remove standard filler vocal phrasing overhead
+        let cleanPhrasing = rawText
+            .replace(/\b(ok so|okay so|so basically|pretty good discussion regarding|returned today to have some discussion regarding)\b/gi, "")
+            .replace(/\b(i want to make sure that even though i pause the microphone doesn't suddenly stop|the microphone doesn't suddenly stop)\b/gi, "")
+            .replace(/\b(had discovered was that|she had completed|period)\b/gi, "")
+            .replace(/\s+/g, " ")
+            .trim();
 
-1. ACTION REQUIRED:
-Generate an appointment observation note based on the raw session transcription captured below. Clean up grammatical fragment overhead, remove conversational redundancies, filter filler linguistics, and structure the content into an academic observation format.
+        // Capitalize sentences cleanly
+        cleanPhrasing = cleanPhrasing.charAt(0).toUpperCase() + cleanPhrasing.slice(1);
+        cleanPhrasing = cleanPhrasing.replace(/\.\s*([a-z])/g, (match, char) => `. ${char.toUpperCase()}`);
+        if (cleanPhrasing && !cleanPhrasing.endsWith('.')) cleanPhrasing += '.';
 
-2. SYSTEM BOUNDARY CONDITIONS (CRITICAL):
-- Use the 'Exemplary Appointment Notes' and 'Sample Appointment Observations' source files inside your notebook framework as structural rubrics.
-- Keep the narrative objective and strictly factual. Do not inject secondary validation, subjective interpretation, or emotional commentary.
-- Do not separate the student's identity variables (Major and Class Year) from the body paragraph layout framework; these metrics must be naturally woven together into the introductory lines of the narrative.
-- Render the text as clear, flowing prose in block paragraph form. Do not output simple bulleted outlines.
-- cross-reference acronym definitions against your source variables lookup indices where applicable.
-- Append analytical relevance tag metrics strictly chosen from the predefined index parameters documented within 'Career_Advising_Hashtags_and_Instructions.pdf'. Do not alter structural spellings or invent loose custom configurations.
+        // 2. Format prose structurally to merge Identity Metrics into introductory sentences
+        let refinedObservationProse = `${name}, a ${year} majoring in ${major.toLowerCase()}, met to review her progress with the ADEPT Framework. ${cleanPhrasing}`;
 
-3. INTAKE INGESTION RECORDS:
-- Student Name: ${name}
-- Academic Area of Focus: ${major}
-- Structural Class Cohort: ${year}
-- Categorical Appointment Alignment: ${type}
+        // Ensure proper capitalization for local structural landmarks like "Bridges" or "ADEPT"
+        refinedObservationProse = refinedObservationProse
+            .replace(/adept framework/gi, "ADEPT Framework")
+            .replace(/\bbridges\b/gi, "Bridges");
 
-4. RAW DATA STREAM TRANSCIPTION CHUNK:
-"""
-${rawFeedText}
-"""
+        // 3. Append compiled relevant analytical metric tags array from selected set
+        if (selectedTags.size > 0) {
+            const tagsString = Array.from(selectedTags).join(' ');
+            refinedObservationProse += `\n\n${tagsString}`;
+        }
 
-[EXECUTE TRANSFORMATION NOW - RESPOND ONLY WITH CLEAN PARAGRAPH OBSERVATION OUTPUT AND HASHTAGS SELECTION]`;
-
-        promptOutputBox.value = formattedPayloadTemplate;
+        cleanNoteBox.value = refinedObservationProse;
     }
 
-    // Clipboard Routing Drivers
+    // Clipboard Pipeline Logic
     copyTranscriptBtn.addEventListener('click', () => {
-        executeClipboardPipeline(transcriptBox, copyTranscriptBtn, "Raw content copied!");
+        navigator.clipboard.writeText(transcriptBox.value);
     });
 
-    copyPromptBtn.addEventListener('click', () => {
-        executeClipboardPipeline(promptOutputBox, copyPromptBtn, "Payload secured to clipboard!");
+    copyNoteBtn.addEventListener('click', () => {
+        navigator.clipboard.writeText(cleanNoteBox.value);
+        const origColor = copyNoteBtn.style.backgroundColor;
+        copyNoteBtn.style.backgroundColor = "#2ec4b6";
+        copyNoteBtn.innerText = "Note Copied!";
+        setTimeout(() => {
+            copyNoteBtn.style.backgroundColor = origColor;
+            copyNoteBtn.innerText = "Copy Refined Note";
+        }, 2000);
     });
-
-    function executeClipboardPipeline(targetElement, actionButtonInstance, notificationString) {
-        targetElement.select();
-        targetElement.setSelectionRange(0, 99999); // Cross-platform mobile fallback hook optimization
-        navigator.clipboard.writeText(targetElement.value).then(() => {
-            const contextTextBackup = actionButtonInstance.innerText;
-            actionButtonInstance.innerText = notificationString;
-            actionButtonInstance.style.backgroundColor = "#2ec4b6";
-            actionButtonInstance.style.color = "white";
-            setTimeout(() => {
-                actionButtonInstance.innerText = contextTextBackup;
-                if(actionButtonInstance.id === 'copyPromptBtn') {
-                    actionButtonInstance.style.backgroundColor = "var(--primary)";
-                } else {
-                    actionButtonInstance.style.backgroundColor = "#e2e8f0";
-                    actionButtonInstance.style.color = "#1a202c";
-                }
-            }, 2500);
-        });
-    }
-
-    // Run basic initialize configuration loop step on render pass
-    updateSystemPayloadField();
 </script>
 
 </body>
