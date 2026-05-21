@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Advising Appointment Scribe & Ingestion Preparer</title>
+    <title>Advising Scribe & Ingestion Preparer</title>
     <style>
         :root {
             --primary: #0066cc;
@@ -44,6 +44,38 @@
             text-align: center;
             border-bottom: 2px solid var(--bg);
             padding-bottom: 12px;
+            margin-bottom: 15px;
+        }
+
+        /* Context Switcher Styling */
+        .context-switcher {
+            display: flex;
+            justify-content: center;
+            background: #e2e8f0;
+            padding: 6px;
+            border-radius: 30px;
+            margin-bottom: 25px;
+            border: 1px solid var(--border);
+        }
+
+        .context-btn {
+            flex: 1;
+            padding: 10px 20px;
+            border: none;
+            background: transparent;
+            font-size: 0.95rem;
+            font-weight: 600;
+            color: #4a5568;
+            cursor: pointer;
+            border-radius: 25px;
+            transition: all 0.2s ease;
+            text-align: center;
+        }
+
+        .context-btn.active {
+            background: var(--primary);
+            color: white;
+            box-shadow: 0 2px 6px rgba(0,102,204,0.3);
         }
 
         .meta-grid {
@@ -244,7 +276,12 @@
 <body>
 
 <div class="container">
-    <h2>Advising Appointment Scribe & Ingestion Preparer</h2>
+    <h2>Advising Scribe & Ingestion Preparer</h2>
+    
+    <div class="context-switcher">
+        <button id="liveModeBtn" class="context-btn active" onclick="switchContext('live')">Live Session Conversation</button>
+        <button id="dictateModeBtn" class="context-btn" onclick="switchContext('dictate')">Post-Appointment Dictation</button>
+    </div>
     
     <div class="meta-grid">
         <div class="form-group">
@@ -286,14 +323,14 @@
 
     <div class="workspace">
         <div class="panel">
-            <label for="transcriptBox">Live Feed Stream (Raw Continuous Capture)</label>
+            <label id="feedLabel" for="transcriptBox">Live Feed Stream (Raw Continuous Dialogue)</label>
             <textarea id="transcriptBox" placeholder="Text stream will isolate here once hardware begins listening..."></textarea>
             <button id="copyTranscriptBtn" class="btn btn-action">Copy Raw Stream</button>
         </div>
         
         <div class="panel">
-            <label for="cleanNoteBox">Formatted AI Ingestion Payload Pack</label>
-            <textarea id="cleanNoteBox" placeholder="The structured workspace execution block will update here..."></textarea>
+            <label for="cleanNoteBox">Structured AI Ingestion Prompt Payload</label>
+            <textarea id="cleanNoteBox" placeholder="The wrapped context execution prompt payload will update here..."></textarea>
             <button id="copyNoteBtn" class="btn btn-action" style="background-color: var(--primary); color: white;">Copy Prompt Payload</button>
         </div>
     </div>
@@ -321,6 +358,7 @@
     let isPaused = false;
     let finalTranscript = '';
     let selectedTags = new Set();
+    let currentContext = 'live'; // 'live' or 'dictate'
 
     const startBtn = document.getElementById('startBtn');
     const pauseBtn = document.getElementById('pauseBtn');
@@ -330,6 +368,7 @@
     const statusText = document.getElementById('statusText');
     const transcriptBox = document.getElementById('transcriptBox');
     const cleanNoteBox = document.getElementById('cleanNoteBox');
+    const feedLabel = document.getElementById('feedLabel');
     
     const studentName = document.getElementById('studentName');
     const studentMajor = document.getElementById('studentMajor');
@@ -339,6 +378,24 @@
     const copyTranscriptBtn = document.getElementById('copyTranscriptBtn');
     const copyNoteBtn = document.getElementById('copyNoteBtn');
     const tagCloud = document.getElementById('tagCloud');
+
+    // Handle Context Toggling Layout Changes
+    function switchContext(mode) {
+        currentContext = mode;
+        const liveBtn = document.getElementById('liveModeBtn');
+        const dictateBtn = document.getElementById('dictateModeBtn');
+        
+        if (mode === 'live') {
+            liveBtn.classList.add('active');
+            dictateBtn.classList.remove('active');
+            feedLabel.innerText = "Live Feed Stream (Raw Continuous Dialogue)";
+        } else {
+            dictateBtn.classList.add('active');
+            liveBtn.classList.remove('active');
+            feedLabel.innerText = "Live Feed Stream (Solo Dictation Scribing)";
+        }
+        generateIngestionPayload();
+    }
 
     [studentName, studentMajor, classYear, apptType, transcriptBox].forEach(element => {
         element.addEventListener('input', generateIngestionPayload);
@@ -369,7 +426,7 @@
         recognition.onstart = () => {
             if (!isPaused) {
                 statusIndicator.className = 'indicator active';
-                statusText.innerText = "Listening actively...";
+                statusText.innerText = currentContext === 'live' ? "Listening to dialogue stream..." : "Recording dictation recollection...";
             }
         };
 
@@ -397,7 +454,7 @@
         statusText.innerText = "Local browser lacks speech parameters compatibility.";
     }
 
-    // Capture Loop State Triggers (Pause/Stop Fully Wrapped Back In)
+    // Capture Controls Console Deck
     startBtn.addEventListener('click', () => {
         finalTranscript = '';
         transcriptBox.value = '';
@@ -428,7 +485,7 @@
             isPaused = false;
             recognition.start();
             statusIndicator.className = 'indicator active';
-            statusText.innerText = "Listening actively...";
+            statusText.innerText = currentContext === 'live' ? "Listening to dialogue stream..." : "Recording dictation recollection...";
             resumeBtn.style.display = 'none';
             pauseBtn.style.display = 'inline-block';
         }
@@ -447,7 +504,7 @@
         generateIngestionPayload();
     });
 
-    // Payloads Generator formatting structural arrays
+    // Paynotes Generator 
     function generateIngestionPayload() {
         const name = studentName.value.trim() || "[Student Preferred Name]";
         const major = studentMajor.value.trim() || "[Major]";
@@ -456,20 +513,26 @@
         let rawText = transcriptBox.value.trim();
 
         if (!rawText) {
-            cleanNoteBox.value = "Waiting for raw conversation feed data stream input to compile execution parameters...";
+            cleanNoteBox.value = "Waiting for raw audio context data stream to compile template execution payload parameters...";
             return;
         }
 
         const tagArray = Array.from(selectedTags);
         const tagsString = tagArray.length > 0 ? tagArray.join(' ') : "None selected";
 
-        // Automated execution prompt template wrapping logic
         let compiledBlock = `/appointment_note\n\n`;
-        compiledBlock += `Generate an appointment observation of a career advising appointment with ${name}, a ${major} major in the ${year} class.\n\n`;
-        compiledBlock += `[CONTEXT PARAMS]\n`;
+        compiledBlock += `Generate a professional appointment observation for a career advising appointment with ${name}, a ${major} major in the ${year} class.\n\n`;
+        compiledBlock += `[METADATA VARIABLES]\n`;
+        compiledBlock += `- Session Format Context: ${currentContext === 'live' ? 'LIVE MULTI-SPEAKER ADVISING DIALOGUE' : 'POST-SESSION ADVISOR DICTATION'}\n`;
         compiledBlock += `- Appointment Type Focus: ${type}\n`;
         compiledBlock += `- Selected Relevance Tags: ${tagsString}\n\n`;
-        compiledBlock += `[RAW AUDIO CONVERSATION CONTEXT]\n`;
+        
+        if (currentContext === 'live') {
+            compiledBlock += `[RAW INTERACTIVE DIALOGUE FEED - NOTE TO AI: DIALOGUE STREAM CONTAINS CONVERSATION CO-MINGLED BETWEEN ADVISOR AND STUDENT. PARSE LOGICALLY SEPARATING STATEMENTS BY INDIVIDUAL SPEAKERS BASED ON NATURAL CONTEXT PATTERNS]\n`;
+        } else {
+            compiledBlock += `[SUMMARY DICTATION RECOLLECTION - NOTE TO AI: THE FOLLOWING IS A SOLO DICTATED ACCOUNT RECALLING ENTIRE APPOINTMENT TOPICS FROM THE PERSPECTIVE OF THE ADVISOR]\n`;
+        }
+        
         compiledBlock += `"${rawText}"`;
 
         cleanNoteBox.value = compiledBlock;
