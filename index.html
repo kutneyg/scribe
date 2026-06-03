@@ -314,13 +314,20 @@
             <input type="text" id="studentMajor" placeholder="e.g., Psychology">
         </div>
         <div class="form-group">
+            <label for="noteLength">Observation Detail Format</label>
+            <select id="noteLength">
+                <option value="Standard" selected>Standard (Comprehensive)</option>
+                <option value="Condensed">Condensed (Short Summary)</option>
+            </select>
+        </div>
+        <div class="form-group">
             <label for="apptSequence">Appointment Sequence</label>
             <select id="apptSequence">
                 <option value="First Appointment">First Appointment</option>
                 <option value="Follow-Up Appointment" selected>Follow-Up Appointment</option>
             </select>
         </div>
-        <div class="form-group">
+        <div class="form-group" style="grid-column: span 1;">
             <label for="apptType">Appointment Type</label>
             <input type="text" id="apptType" placeholder="e.g., TD - Career Exploration">
         </div>
@@ -391,6 +398,7 @@
     const studentPronouns = document.getElementById('studentPronouns');
     const classYear = document.getElementById('classYear');
     const studentMajor = document.getElementById('studentMajor');
+    const noteLength = document.getElementById('noteLength');
     const apptSequence = document.getElementById('apptSequence');
     const apptType = document.getElementById('apptType');
 
@@ -415,7 +423,7 @@
         generateIngestionPayload();
     }
 
-    [studentName, studentPronouns, classYear, studentMajor, apptSequence, apptType, transcriptBox].forEach(element => {
+    [studentName, studentPronouns, classYear, studentMajor, noteLength, apptSequence, apptType, transcriptBox].forEach(element => {
         element.addEventListener('input', generateIngestionPayload);
     });
 
@@ -526,6 +534,7 @@
         const pronouns = studentPronouns.value || "[Pronouns Not Specified]";
         const year = classYear.value || "[Year]";
         const major = studentMajor.value.trim() || "[Major]";
+        const lengthStyle = noteLength.value;
         const sequence = apptSequence.value;
         const type = apptType.value.trim() || "[Appointment Type]";
         let rawText = transcriptBox.value.trim();
@@ -538,10 +547,14 @@
         const tagArray = Array.from(selectedTags);
         const tagsString = tagArray.length > 0 ? tagArray.join(' ') : "None selected";
 
-        let compiledBlock = `/appointment_note\n\n`;
+        // Assign correct macro command based on selected layout length format variable
+        let macroCommand = lengthStyle === 'Condensed' ? '/appointment_note_short' : '/appointment_note';
+
+        let compiledBlock = `${macroCommand}\n\n`;
         compiledBlock += `Generate a professional appointment observation for a career advising appointment with ${name}.\n\n`;
         compiledBlock += `[METADATA VARIABLES]\n`;
         compiledBlock += `- Session Format Context: ${currentContext === 'live' ? 'LIVE MULTI-SPEAKER ADVISING DIALOGUE' : 'POST-SESSION ADVISOR DICTATION'}\n`;
+        compiledBlock += `- Appointment Detail Target: ${lengthStyle.toUpperCase()}\n`;
         compiledBlock += `- Appointment Sequence: ${sequence}\n`;
         compiledBlock += `- Student Preferred Pronouns: ${pronouns}\n`;
         compiledBlock += `- Class Year: ${year === "[Year]" ? "BLANK/OMITTED" : year}\n`;
