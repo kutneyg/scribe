@@ -22,6 +22,7 @@ function createGeminiClient(): GoogleGenAI {
   }
   return new GoogleGenAI({
     apiKey,
+    apiVersion: "v1beta",
     httpOptions: {
       headers: {
         "User-Agent": "aistudio-build",
@@ -86,7 +87,25 @@ function formatApiError(err: unknown): { status: number; message: string } {
         "Gemini API rate limit or quota exceeded. Please try again shortly.",
     };
   }
+  if (rawMessage.includes("NOT_FOUND") || rawMessage.includes("404")) {
+    return { status: 404, message: rawMessage };
+  }
   return { status: 500, message: rawMessage };
+}
+
+function isModelNotFoundError(err: unknown): boolean {
+  if (err && typeof err === "object") {
+    const status = (err as { status?: unknown }).status;
+    if (status === 404 || status === "NOT_FOUND") {
+      return true;
+    }
+  }
+  const msg = extractErrorMessage(err);
+  return (
+    msg.includes("NOT_FOUND") ||
+    msg.includes("is not found for API version") ||
+    msg.includes("not supported for generateContent")
+  );
 }
 
 app.get("/", (_req, res) => {
@@ -128,22 +147,47 @@ app.post("/api/transcribe", async (req, res) => {
         ? "This is a career advising dialogue between an advisor and a student."
         : "This is a post-appointment career advising dictation by an advisor.";
 
-    const response = await ai.models.generateContent({
-      model: "gemini-3.5-transcribe",
-      contents: {
-        parts: [
-          {
-            inlineData: {
-              mimeType: normalizedMime,
-              data: audio,
-            },
+    const candidateModels = [
+      "gemini-3.5-transcribe",
+      "gemini-4-hydrogen",
+      "gemini-3.1-flash-lite",
+      "gemini-2.5-flash",
+    ];
+
+    let response: Awaited<ReturnType<typeof ai.models.generateContent>> | null = null;
+    let lastNotFoundError: unknown = null;
+
+    for (const model of candidateModels) {
+      try {
+        response = await ai.models.generateContent({
+          model,
+          contents: {
+            parts: [
+              {
+                inlineData: {
+                  mimeType: normalizedMime,
+                  data: audio,
+                },
+              },
+              {
+                text: `Transcribe this audio verbatim with accurate punctuation, capitalization, and natural sentence spacing. ${contextHint} Return only the transcript text without extra commentary.`,
+              },
+            ],
           },
-          {
-            text: `Transcribe this audio verbatim with accurate punctuation, capitalization, and natural sentence spacing. ${contextHint} Return only the transcript text without extra commentary.`,
-          },
-        ],
-      },
-    });
+        });
+        break;
+      } catch (modelErr) {
+        if (isModelNotFoundError(modelErr)) {
+          lastNotFoundError = modelErr;
+          continue;
+        }
+        throw modelErr;
+      }
+    }
+
+    if (!response) {
+      throw lastNotFoundError ?? new Error("No supported transcription model was found.");
+    }
 
     const transcript = (response.text ?? "").trim();
     res.json({ transcript });
