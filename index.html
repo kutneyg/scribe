@@ -233,16 +233,6 @@
         }
         .btn-action:hover { background-color: #cbd5e1; }
 
-        .panel-actions {
-            display: flex;
-            gap: 10px;
-            margin-top: 10px;
-        }
-        .panel-actions .btn-action {
-            flex: 1;
-            margin-top: 0;
-        }
-
         .hashtag-bank {
             margin-top: 15px;
             background: #f8fafc;
@@ -360,11 +350,7 @@
         <div class="panel">
             <label id="feedLabel" for="transcriptBox">Live Feed Stream (Raw Continuous Dialogue)</label>
             <textarea id="transcriptBox" placeholder="Text stream will isolate here once hardware begins listening..."></textarea>
-            <input type="file" id="audioFileInput" accept="audio/*,.mp3,.wav,.m4a,.webm,.ogg" style="display: none;">
-            <div class="panel-actions">
-                <button id="copyTranscriptBtn" class="btn btn-action">Copy Raw Stream</button>
-                <button id="uploadAudioBtn" class="btn btn-action">Transcribe Audio File</button>
-            </div>
+            <button id="copyTranscriptBtn" class="btn btn-action">Copy Raw Stream</button>
         </div>
         
         <div class="panel">
@@ -392,25 +378,18 @@
 </div>
 
 <script>
+    let recognition = null;
     let isRecording = false;
     let isPaused = false;
+    let isRecognitionRunning = false;
+    let restartTimer = null;
+    let networkRetryCount = 0;
+    let lastFinalResultTime = 0;
+
     let finalTranscript = '';
     let currentInterim = '';
     let selectedTags = new Set();
     let currentContext = 'live';
-
-    let ws = null;
-    let mediaStream = null;
-    let audioCtx = null;
-    let sourceNode = null;
-    let processorNode = null;
-    let zeroGainNode = null;
-    let stopFallbackTimer = null;
-
-    let httpFallbackActive = false;
-    let activeRecorder = null;
-    let segmentTimer = null;
-    let httpTranscribeQueue = Promise.resolve();
 
     const startBtn = document.getElementById('startBtn');
     const pauseBtn = document.getElementById('pauseBtn');
@@ -431,8 +410,6 @@
     const apptType = document.getElementById('apptType');
 
     const copyTranscriptBtn = document.getElementById('copyTranscriptBtn');
-    const uploadAudioBtn = document.getElementById('uploadAudioBtn');
-    const audioFileInput = document.getElementById('audioFileInput');
     const copyNoteBtn = document.getElementById('copyNoteBtn');
     const tagCloud = document.getElementById('tagCloud');
 
@@ -486,164 +463,71 @@
         }
     });
 
-    function appendTranscriptSegment(base, segment) {
-        if (!segment) return base;
-        if (!base) return segment.trimStart();
-        const baseEndsWithSpace = /\s$/.test(base);
-        const segStartsWithSpaceOrPunct = /^[\s.,!?;:'")\]\-]/.test(segment);
-        if (baseEndsWithSpace || segStartsWithSpaceOrPunct) {
-            return base + segment;
+    function normalizeSpokenSegment(text, shouldCapitalizeStart) {
+        if (!text) return '';
+        let cleaned = text.replace(/\s+/g, ' ').trim();
+        if (!cleaned) return '';
+
+        // Fix spacing before punctuation
+        cleaned = cleaned.replace(/\s+([.,!?;:])/g, '$1');
+
+        // Capitalize standalone English first-person pronouns
+        cleaned = cleaned.replace(/\bi\b/g, 'I');
+        cleaned = cleaned.replace(/\bi'(m|ve|ll|d)\b/gi, (match, suffix) => "I'" + suffix.toLowerCase());
+
+        // Capitalize letter immediately following sentence-ending punctuation
+        cleaned = cleaned.replace(/([.!?]\s+)([a-z])/g, (_, prefix, ch) => prefix + ch.toUpperCase());
+
+        if (shouldCapitalizeStart) {
+            cleaned = cleaned.charAt(0).toUpperCase() + cleaned.slice(1);
         }
-        return base + ' ' + segment;
+
+        return cleaned;
+    }
+
+    function appendFormattedSegment(base, segment, addPausePeriod) {
+        if (!segment || !segment.trim()) return base;
+
+        let preparedBase = base;
+        if (addPausePeriod && preparedBase && !/[.!?,:;\-\n]\s*$/.test(preparedBase)) {
+            preparedBase = preparedBase.replace(/\s+$/, '') + '.';
+        }
+
+        const startsSentence = !preparedBase || /[.!?\n]\s*$/.test(preparedBase);
+        const formatted = normalizeSpokenSegment(segment, startsSentence);
+        if (!formatted) return preparedBase;
+
+        if (!preparedBase) return formatted;
+        const baseEndsWithSpace = /\s$/.test(preparedBase);
+        const segStartsWithPunct = /^[.,!?;:'")\]\-]/.test(formatted);
+        if (baseEndsWithSpace || segStartsWithPunct) {
+            return preparedBase + formatted;
+        }
+        return preparedBase + ' ' + formatted;
+    }
+
+    function selectBestAlternative(result) {
+        if (!result || result.length === 0) return '';
+        let bestTranscript = result[0].transcript || '';
+        let bestConfidence = typeof result[0].confidence === 'number' ? result[0].confidence : 0;
+
+        for (let i = 1; i < result.length; i++) {
+            const alt = result[i];
+            const conf = typeof alt.confidence === 'number' ? alt.confidence : 0;
+            if (conf > bestConfidence && alt.transcript && alt.transcript.trim()) {
+                bestConfidence = conf;
+                bestTranscript = alt.transcript;
+            }
+        }
+        return bestTranscript;
     }
 
     function promoteInterimToFinal() {
         if (currentInterim && currentInterim.trim()) {
-            finalTranscript = appendTranscriptSegment(finalTranscript, currentInterim);
+            finalTranscript = appendFormattedSegment(finalTranscript, currentInterim, false);
             currentInterim = '';
             transcriptBox.value = finalTranscript;
             generateIngestionPayload();
-        }
-    }
-
-    function downsampleTo16kHz(buffer, inputSampleRate) {
-        if (inputSampleRate === 16000) return buffer;
-        const ratio = inputSampleRate / 16000;
-        const newLength = Math.round(buffer.length / ratio);
-        const result = new Float32Array(newLength);
-        let offsetResult = 0;
-        let offsetBuffer = 0;
-        while (offsetResult < result.length) {
-            const nextOffsetBuffer = Math.round((offsetResult + 1) * ratio);
-            let accum = 0;
-            let count = 0;
-            for (let i = offsetBuffer; i < nextOffsetBuffer && i < buffer.length; i++) {
-                accum += buffer[i];
-                count++;
-            }
-            result[offsetResult] = count > 0 ? accum / count : 0;
-            offsetResult++;
-            offsetBuffer = nextOffsetBuffer;
-        }
-        return result;
-    }
-
-    function float32ToBase64Pcm16(float32Array) {
-        const buffer = new ArrayBuffer(float32Array.length * 2);
-        const view = new DataView(buffer);
-        for (let i = 0; i < float32Array.length; i++) {
-            const clamped = Math.max(-1, Math.min(1, float32Array[i]));
-            view.setInt16(i * 2, clamped < 0 ? clamped * 0x8000 : clamped * 0x7fff, true);
-        }
-        const bytes = new Uint8Array(buffer);
-        let binary = '';
-        const chunkSize = 0x8000;
-        for (let i = 0; i < bytes.length; i += chunkSize) {
-            binary += String.fromCharCode.apply(null, bytes.subarray(i, i + chunkSize));
-        }
-        return btoa(binary);
-    }
-
-    function arrayBufferToBase64(arrayBuffer) {
-        const bytes = new Uint8Array(arrayBuffer);
-        let binary = '';
-        const chunkSize = 0x8000;
-        for (let i = 0; i < bytes.length; i += chunkSize) {
-            binary += String.fromCharCode.apply(null, bytes.subarray(i, i + chunkSize));
-        }
-        return btoa(binary);
-    }
-
-    async function postTranscribeRequest(base64Audio, mimeType) {
-        const response = await fetch('/api/transcribe', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                audio: base64Audio,
-                mimeType,
-                context: currentContext
-            })
-        });
-
-        const rawBody = await response.text();
-        let data = {};
-        try {
-            data = rawBody ? JSON.parse(rawBody) : {};
-        } catch {
-            data = { error: rawBody || `Transcription request failed (${response.status}).` };
-        }
-
-        if (!response.ok) {
-            throw new Error(data.error || `Transcription request failed (${response.status}).`);
-        }
-
-        return (data.transcript || '').trim();
-    }
-
-    function teardownWebAudioNodes() {
-        if (processorNode) {
-            processorNode.onaudioprocess = null;
-            try { processorNode.disconnect(); } catch {}
-            processorNode = null;
-        }
-        if (sourceNode) {
-            try { sourceNode.disconnect(); } catch {}
-            sourceNode = null;
-        }
-        if (zeroGainNode) {
-            try { zeroGainNode.disconnect(); } catch {}
-            zeroGainNode = null;
-        }
-        if (audioCtx) {
-            try { audioCtx.close(); } catch {}
-            audioCtx = null;
-        }
-    }
-
-    function stopHttpFallbackRecorder() {
-        httpFallbackActive = false;
-        if (segmentTimer) {
-            clearInterval(segmentTimer);
-            segmentTimer = null;
-        }
-        if (activeRecorder && activeRecorder.state !== 'inactive') {
-            try { activeRecorder.stop(); } catch {}
-        }
-        activeRecorder = null;
-    }
-
-    function teardownAudioPipeline() {
-        teardownWebAudioNodes();
-        stopHttpFallbackRecorder();
-        if (mediaStream) {
-            mediaStream.getTracks().forEach(track => track.stop());
-            mediaStream = null;
-        }
-    }
-
-    function closeWebSocketGracefully() {
-        if (stopFallbackTimer) {
-            clearTimeout(stopFallbackTimer);
-            stopFallbackTimer = null;
-        }
-        const socket = ws;
-        if (!socket) return;
-
-        if (socket.readyState === WebSocket.OPEN) {
-            try {
-                socket.send(JSON.stringify({ type: 'stop' }));
-            } catch {}
-            stopFallbackTimer = setTimeout(() => {
-                if (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING) {
-                    try { socket.close(); } catch {}
-                }
-                if (ws === socket) ws = null;
-                promoteInterimToFinal();
-            }, 450);
-        } else {
-            try { socket.close(); } catch {}
-            ws = null;
-            promoteInterimToFinal();
         }
     }
 
@@ -654,266 +538,157 @@
         stopBtn.style.display = 'none';
     }
 
-    function getSupportedRecorderMimeType() {
-        if (typeof MediaRecorder === 'undefined') return '';
-        const candidates = [
-            'audio/webm;codecs=opus',
-            'audio/webm',
-            'audio/mp4',
-            'audio/ogg;codecs=opus'
-        ];
-        for (const candidate of candidates) {
-            if (MediaRecorder.isTypeSupported(candidate)) {
-                return candidate;
-            }
+    function clearScheduledRestart() {
+        if (restartTimer) {
+            clearTimeout(restartTimer);
+            restartTimer = null;
         }
-        return '';
     }
 
-    function startHttpChunkedFallback() {
-        if (!mediaStream || typeof MediaRecorder === 'undefined') {
-            isRecording = false;
-            isPaused = false;
-            teardownAudioPipeline();
-            resetControlButtonsToIdle();
-            statusIndicator.className = 'indicator';
-            statusText.innerText = "Live transcription connection unavailable in this browser.";
-            return;
+    function safeStartRecognition() {
+        if (!recognition || isRecognitionRunning) return;
+        try {
+            recognition.start();
+        } catch (err) {
+            // Ignore InvalidStateError if already started
+            if (err && err.name !== 'InvalidStateError') {
+                console.error("Speech Recognition start error:", err);
+            }
         }
-
-        httpFallbackActive = true;
-        statusIndicator.className = 'indicator active';
-        statusText.innerText = currentContext === 'live'
-            ? "Listening to dialogue stream..."
-            : "Recording dictation recollection...";
-
-        const mimeType = getSupportedRecorderMimeType();
-
-        const startSegmentRecorder = () => {
-            if (!httpFallbackActive || !mediaStream) return;
-            const chunks = [];
-            let recorder;
-            try {
-                recorder = mimeType
-                    ? new MediaRecorder(mediaStream, { mimeType })
-                    : new MediaRecorder(mediaStream);
-            } catch (err) {
-                isRecording = false;
-                isPaused = false;
-                teardownAudioPipeline();
-                resetControlButtonsToIdle();
-                statusIndicator.className = 'indicator';
-                statusText.innerText = err && err.message ? err.message : "Failed to initialize audio recorder.";
-                return;
-            }
-
-            activeRecorder = recorder;
-
-            recorder.ondataavailable = (ev) => {
-                if (ev.data && ev.data.size > 0) {
-                    chunks.push(ev.data);
-                }
-            };
-
-            recorder.onstop = () => {
-                if (chunks.length === 0) return;
-                const blob = new Blob(chunks, { type: recorder.mimeType || mimeType || 'audio/webm' });
-                if (blob.size < 1200) return;
-
-                httpTranscribeQueue = httpTranscribeQueue.then(async () => {
-                    try {
-                        const buffer = await blob.arrayBuffer();
-                        const base64Audio = arrayBufferToBase64(buffer);
-                        const segmentText = await postTranscribeRequest(
-                            base64Audio,
-                            blob.type || 'audio/webm'
-                        );
-                        if (segmentText) {
-                            finalTranscript = appendTranscriptSegment(finalTranscript, segmentText);
-                            transcriptBox.value = finalTranscript;
-                            transcriptBox.scrollTop = transcriptBox.scrollHeight;
-                            generateIngestionPayload();
-                        }
-                    } catch (err) {
-                        isRecording = false;
-                        isPaused = false;
-                        teardownAudioPipeline();
-                        resetControlButtonsToIdle();
-                        statusIndicator.className = 'indicator';
-                        statusText.innerText = err && err.message
-                            ? err.message
-                            : "Audio transcription failed.";
-                    }
-                });
-            };
-
-            recorder.start();
-        };
-
-        startSegmentRecorder();
-        segmentTimer = setInterval(() => {
-            if (!httpFallbackActive || !isRecording || isPaused) return;
-            const prev = activeRecorder;
-            if (prev && prev.state === 'recording') {
-                prev.stop();
-            }
-            startSegmentRecorder();
-        }, 5000);
     }
 
-    async function beginLiveCapture() {
-        if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-            statusIndicator.className = 'indicator';
-            statusText.innerText = "Microphone capture is unavailable in this browser.";
-            isRecording = false;
-            isPaused = false;
-            resetControlButtonsToIdle();
-            return;
-        }
-
-        statusIndicator.className = 'indicator active';
-        statusText.innerText = "Connecting high-accuracy transcription stream...";
-
+    function safeStopRecognition() {
+        clearScheduledRestart();
+        if (!recognition) return;
         try {
-            mediaStream = await navigator.mediaDevices.getUserMedia({
-                audio: {
-                    channelCount: 1,
-                    echoCancellation: true,
-                    noiseSuppression: true,
-                    autoGainControl: true
-                }
-            });
-        } catch (err) {
-            isRecording = false;
-            isPaused = false;
-            teardownAudioPipeline();
-            resetControlButtonsToIdle();
-            statusIndicator.className = 'indicator';
-            statusText.innerText = err && err.message
-                ? "Microphone access denied: " + err.message
-                : "Microphone access denied.";
-            return;
+            recognition.stop();
+        } catch {
+            // Ignore stop errors if already stopped
         }
+    }
 
-        const wsProtocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
-        const socket = new WebSocket(`${wsProtocol}//${location.host}/ws/transcribe`);
-        ws = socket;
-        let wsReady = false;
-        let wsReceivedError = false;
-        let fallbackTriggered = false;
+    if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
+        const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+        recognition = new SpeechRecognition();
 
-        const triggerFallbackIfEligible = () => {
-            if (fallbackTriggered || wsReady || wsReceivedError) return;
-            if (!isRecording || isPaused) return;
-            fallbackTriggered = true;
-            if (ws === socket) ws = null;
-            teardownWebAudioNodes();
-            startHttpChunkedFallback();
+        recognition.continuous = true;
+        recognition.interimResults = true;
+        recognition.maxAlternatives = 3;
+        recognition.lang = (navigator.language && navigator.language.startsWith('en'))
+            ? navigator.language
+            : 'en-US';
+
+        recognition.onstart = () => {
+            isRecognitionRunning = true;
+            networkRetryCount = 0;
+            if (isRecording && !isPaused) {
+                statusIndicator.className = 'indicator active';
+                statusText.innerText = currentContext === 'live'
+                    ? "Listening to dialogue stream..."
+                    : "Recording dictation recollection...";
+            }
         };
 
-        try {
-            const AudioCtx = window.AudioContext || window.webkitAudioContext;
-            try {
-                audioCtx = new AudioCtx({ sampleRate: 16000 });
-            } catch {
-                audioCtx = new AudioCtx();
-            }
-            if (audioCtx.state === 'suspended') {
-                await audioCtx.resume();
-            }
+        recognition.onerror = (event) => {
+            const errorType = event && event.error ? event.error : 'unknown';
 
-            sourceNode = audioCtx.createMediaStreamSource(mediaStream);
-            processorNode = audioCtx.createScriptProcessor(4096, 1, 1);
-            zeroGainNode = audioCtx.createGain();
-            zeroGainNode.gain.value = 0;
-
-            sourceNode.connect(processorNode);
-            processorNode.connect(zeroGainNode);
-            zeroGainNode.connect(audioCtx.destination);
-
-            processorNode.onaudioprocess = (event) => {
-                if (!isRecording || isPaused || socket.readyState !== WebSocket.OPEN) return;
-                const inputData = event.inputBuffer.getChannelData(0);
-                const pcm16k = downsampleTo16kHz(inputData, audioCtx.sampleRate);
-                const base64Audio = float32ToBase64Pcm16(pcm16k);
-                socket.send(JSON.stringify({ audio: base64Audio }));
-            };
-        } catch (err) {
-            try { socket.close(); } catch {}
-            ws = null;
-            teardownWebAudioNodes();
-            startHttpChunkedFallback();
-            return;
-        }
-
-        socket.onmessage = (event) => {
-            let msg;
-            try {
-                msg = JSON.parse(event.data);
-            } catch {
+            if (errorType === 'no-speech') {
+                // Keep listening seamlessly during quiet pauses
                 return;
             }
 
-            if (msg.type === 'ready') {
-                wsReady = true;
-                if (isRecording && !isPaused) {
-                    statusIndicator.className = 'indicator active';
-                    statusText.innerText = currentContext === 'live'
-                        ? "Listening to dialogue stream..."
-                        : "Recording dictation recollection...";
-                }
-            } else if (msg.type === 'interim') {
-                currentInterim = msg.text || '';
-                transcriptBox.value = appendTranscriptSegment(finalTranscript, currentInterim);
-                transcriptBox.scrollTop = transcriptBox.scrollHeight;
-                generateIngestionPayload();
-            } else if (msg.type === 'final') {
-                finalTranscript = appendTranscriptSegment(finalTranscript, msg.text || '');
-                currentInterim = '';
-                transcriptBox.value = finalTranscript;
-                transcriptBox.scrollTop = transcriptBox.scrollHeight;
-                generateIngestionPayload();
-            } else if (msg.type === 'error') {
-                wsReceivedError = true;
-                isRecording = false;
-                isPaused = false;
-                teardownAudioPipeline();
-                if (ws === socket) ws = null;
-                resetControlButtonsToIdle();
-                statusIndicator.className = 'indicator';
-                statusText.innerText = msg.message || "Transcription error occurred.";
-            } else if (msg.type === 'closed') {
-                if (ws === socket) ws = null;
-                promoteInterimToFinal();
-            }
-        };
-
-        socket.onerror = () => {
-            if (!wsReady && !wsReceivedError && isRecording && !isPaused) {
-                triggerFallbackIfEligible();
-            } else if (isRecording && !isPaused && !wsReceivedError) {
-                isRecording = false;
-                isPaused = false;
-                teardownAudioPipeline();
-                resetControlButtonsToIdle();
-                statusIndicator.className = 'indicator';
-                statusText.innerText = "Transcription WebSocket connection failed.";
-            }
-        };
-
-        socket.onclose = () => {
-            if (!wsReady && !wsReceivedError && isRecording && !isPaused) {
-                triggerFallbackIfEligible();
+            if (errorType === 'aborted') {
                 return;
             }
-            if (ws === socket) ws = null;
+
+            if (errorType === 'not-allowed' || errorType === 'service-not-allowed') {
+                isRecording = false;
+                isPaused = false;
+                clearScheduledRestart();
+                resetControlButtonsToIdle();
+                statusIndicator.className = 'indicator';
+                statusText.innerText = "Microphone permission denied. Please allow microphone access in your browser.";
+                return;
+            }
+
+            if (errorType === 'audio-capture') {
+                isRecording = false;
+                isPaused = false;
+                clearScheduledRestart();
+                resetControlButtonsToIdle();
+                statusIndicator.className = 'indicator';
+                statusText.innerText = "No microphone detected. Please check your audio input device.";
+                return;
+            }
+
+            if (errorType === 'network') {
+                networkRetryCount += 1;
+                if (networkRetryCount > 3) {
+                    isRecording = false;
+                    isPaused = false;
+                    clearScheduledRestart();
+                    resetControlButtonsToIdle();
+                    statusIndicator.className = 'indicator';
+                    statusText.innerText = "Speech recognition unavailable (network error).";
+                } else {
+                    statusText.innerText = "Speech service reconnecting...";
+                }
+                return;
+            }
+
+            console.error("Speech Recognition System Error:", errorType);
+        };
+
+        recognition.onend = () => {
+            isRecognitionRunning = false;
             promoteInterimToFinal();
+
+            if (isRecording && !isPaused) {
+                clearScheduledRestart();
+                restartTimer = setTimeout(() => {
+                    if (isRecording && !isPaused) {
+                        safeStartRecognition();
+                    }
+                }, 150);
+            }
         };
+
+        recognition.onresult = (event) => {
+            let interimBuffer = '';
+            const now = Date.now();
+
+            for (let i = event.resultIndex; i < event.results.length; ++i) {
+                const result = event.results[i];
+                if (result.isFinal) {
+                    const bestText = selectBestAlternative(result);
+                    const pauseDetected = lastFinalResultTime > 0 && (now - lastFinalResultTime) >= 1800;
+                    finalTranscript = appendFormattedSegment(finalTranscript, bestText, pauseDetected);
+                    lastFinalResultTime = now;
+                } else {
+                    interimBuffer += result[0].transcript;
+                }
+            }
+
+            currentInterim = interimBuffer.trim();
+            const displayValue = currentInterim
+                ? appendFormattedSegment(finalTranscript, currentInterim, false)
+                : finalTranscript;
+
+            transcriptBox.value = displayValue;
+            transcriptBox.scrollTop = transcriptBox.scrollHeight;
+            generateIngestionPayload();
+        };
+    } else {
+        startBtn.disabled = true;
+        statusText.innerText = "This browser does not support in-browser Speech Recognition (try Chrome, Edge, or Safari).";
     }
 
-    startBtn.addEventListener('click', async () => {
+    startBtn.addEventListener('click', () => {
+        if (!recognition) return;
         finalTranscript = '';
         currentInterim = '';
+        lastFinalResultTime = 0;
+        networkRetryCount = 0;
         transcriptBox.value = '';
         isRecording = true;
         isPaused = false;
@@ -922,9 +697,9 @@
         pauseBtn.style.display = 'inline-block';
         resumeBtn.style.display = 'none';
         stopBtn.style.display = 'inline-block';
-        generateIngestionPayload();
 
-        await beginLiveCapture();
+        safeStartRecognition();
+        generateIngestionPayload();
     });
 
     pauseBtn.addEventListener('click', () => {
@@ -932,8 +707,7 @@
             isPaused = true;
             promoteInterimToFinal();
             finalTranscript = transcriptBox.value;
-            teardownAudioPipeline();
-            closeWebSocketGracefully();
+            safeStopRecognition();
             statusIndicator.className = 'indicator paused';
             statusText.innerText = "Hardware feed paused.";
             pauseBtn.style.display = 'none';
@@ -941,68 +715,35 @@
         }
     });
 
-    resumeBtn.addEventListener('click', async () => {
+    resumeBtn.addEventListener('click', () => {
         if (isRecording && isPaused) {
             isPaused = false;
             finalTranscript = transcriptBox.value;
             currentInterim = '';
+            lastFinalResultTime = Date.now();
             resumeBtn.style.display = 'none';
             pauseBtn.style.display = 'inline-block';
-            await beginLiveCapture();
+            statusIndicator.className = 'indicator active';
+            statusText.innerText = currentContext === 'live'
+                ? "Listening to dialogue stream..."
+                : "Recording dictation recollection...";
+            safeStartRecognition();
         }
     });
 
     stopBtn.addEventListener('click', () => {
         isRecording = false;
         isPaused = false;
-        teardownAudioPipeline();
-        closeWebSocketGracefully();
+        promoteInterimToFinal();
+        if (finalTranscript && !/[.!?,:;\-\n]\s*$/.test(finalTranscript)) {
+            finalTranscript = finalTranscript.replace(/\s+$/, '') + '.';
+            transcriptBox.value = finalTranscript;
+        }
+        safeStopRecognition();
         resetControlButtonsToIdle();
         statusIndicator.className = 'indicator';
         statusText.innerText = "System Idle";
         generateIngestionPayload();
-    });
-
-    uploadAudioBtn.addEventListener('click', () => {
-        audioFileInput.value = '';
-        audioFileInput.click();
-    });
-
-    audioFileInput.addEventListener('change', async (e) => {
-        const file = e.target.files && e.target.files[0];
-        if (!file) return;
-
-        if (file.size > 20 * 1024 * 1024) {
-            statusIndicator.className = 'indicator';
-            statusText.innerText = "Audio file exceeds 20 MB limit.";
-            return;
-        }
-
-        statusIndicator.className = 'indicator active';
-        statusText.innerText = "Transcribing audio file...";
-        uploadAudioBtn.disabled = true;
-
-        try {
-            const buffer = await file.arrayBuffer();
-            const base64Audio = arrayBufferToBase64(buffer);
-            const mimeType = file.type || 'audio/mp3';
-
-            const fileTranscript = await postTranscribeRequest(base64Audio, mimeType);
-            if (fileTranscript) {
-                finalTranscript = appendTranscriptSegment(transcriptBox.value.trim(), fileTranscript);
-                currentInterim = '';
-                transcriptBox.value = finalTranscript;
-                generateIngestionPayload();
-            }
-
-            statusIndicator.className = 'indicator';
-            statusText.innerText = "Audio file transcription complete";
-        } catch (err) {
-            statusIndicator.className = 'indicator';
-            statusText.innerText = err && err.message ? err.message : "Audio transcription failed.";
-        } finally {
-            uploadAudioBtn.disabled = false;
-        }
     });
 
     function generateIngestionPayload() {

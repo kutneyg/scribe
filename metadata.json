@@ -3,8 +3,5 @@
   "description": "Career advising live transcription and structured AI ingestion prompt preparer.",
   "requestFramePermissions": [
     "microphone"
-  ],
-  "majorCapabilities": [
-    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
   ]
 }
