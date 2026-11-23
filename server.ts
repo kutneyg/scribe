@@ -30,28 +30,60 @@ function createGeminiClient(): GoogleGenAI {
   });
 }
 
+function extractErrorMessage(err: unknown): string {
+  if (typeof err === "string" && err.trim().length > 0) {
+    return err.trim();
+  }
+  if (err instanceof Error && err.message) {
+    return err.message;
+  }
+  if (err && typeof err === "object") {
+    const record = err as Record<string, unknown>;
+    if (record.error) {
+      const nested = extractErrorMessage(record.error);
+      if (nested && nested !== "Unexpected transcription error.") {
+        return nested;
+      }
+    }
+    if (typeof record.message === "string" && record.message.trim().length > 0) {
+      return record.message.trim();
+    }
+    if (typeof record.reason === "string" && record.reason.trim().length > 0) {
+      return record.reason.trim();
+    }
+    try {
+      const serialized = JSON.stringify(err);
+      if (serialized && serialized !== "{}") {
+        return serialized;
+      }
+    } catch {
+      // Ignore non-serializable objects
+    }
+  }
+  return "Unexpected transcription error.";
+}
+
 function formatApiError(err: unknown): { status: number; message: string } {
-  const rawMessage =
-    err instanceof Error ? err.message : "Unexpected transcription error.";
-  if (rawMessage.includes("API_KEY_INVALID") || rawMessage.includes("400")) {
+  const rawMessage = extractErrorMessage(err);
+  if (rawMessage.includes("API_KEY_INVALID") || rawMessage.includes("API key not valid")) {
     return {
       status: 400,
       message:
-        "Invalid Gemini API key. Please verify your key in Settings > Secrets.",
+        "Invalid Gemini API key. Please verify your GEMINI_API_KEY configuration.",
     };
   }
   if (rawMessage.includes("PERMISSION_DENIED") || rawMessage.includes("403")) {
     return {
       status: 403,
       message:
-        "Gemini API permission denied. Please check your API key in Settings > Secrets.",
+        "Gemini API permission denied. Please check your GEMINI_API_KEY configuration.",
     };
   }
   if (rawMessage.includes("RESOURCE_EXHAUSTED") || rawMessage.includes("429")) {
     return {
       status: 429,
       message:
-        "Gemini API rate limit or quota exceeded. Please try again shortly or check your plan in Settings > Secrets.",
+        "Gemini API rate limit or quota exceeded. Please try again shortly.",
     };
   }
   return { status: 500, message: rawMessage };
@@ -220,8 +252,18 @@ wss.on("connection", async (clientWs) => {
             );
           }
         },
-        onclose: () => {
+        onclose: (event) => {
           if (clientWs.readyState === WebSocket.OPEN) {
+            if (!closing && ((event?.code && event.code !== 1000 && event.code !== 1005) || event?.reason)) {
+              const reasonMsg = event?.reason || `Live transcription closed unexpectedly (code ${event?.code})`;
+              const formatted = formatApiError(reasonMsg);
+              clientWs.send(
+                JSON.stringify({
+                  type: "error",
+                  message: formatted.message,
+                })
+              );
+            }
             clientWs.send(JSON.stringify({ type: "closed" }));
             clientWs.close();
           }
@@ -278,6 +320,10 @@ wss.on("connection", async (clientWs) => {
   });
 });
 
-server.listen(PORT, "0.0.0.0", () => {
-  console.log(`Server listening on http://0.0.0.0:${PORT}`);
-});
+if (!process.env.VERCEL) {
+  server.listen(PORT, "0.0.0.0", () => {
+    console.log(`Server listening on http://0.0.0.0:${PORT}`);
+  });
+}
+
+export default app;

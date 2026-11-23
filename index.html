@@ -407,6 +407,11 @@
     let zeroGainNode = null;
     let stopFallbackTimer = null;
 
+    let httpFallbackActive = false;
+    let activeRecorder = null;
+    let segmentTimer = null;
+    let httpTranscribeQueue = Promise.resolve();
+
     const startBtn = document.getElementById('startBtn');
     const pauseBtn = document.getElementById('pauseBtn');
     const resumeBtn = document.getElementById('resumeBtn');
@@ -549,7 +554,33 @@
         return btoa(binary);
     }
 
-    function teardownAudioPipeline() {
+    async function postTranscribeRequest(base64Audio, mimeType) {
+        const response = await fetch('/api/transcribe', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                audio: base64Audio,
+                mimeType,
+                context: currentContext
+            })
+        });
+
+        const rawBody = await response.text();
+        let data = {};
+        try {
+            data = rawBody ? JSON.parse(rawBody) : {};
+        } catch {
+            data = { error: rawBody || `Transcription request failed (${response.status}).` };
+        }
+
+        if (!response.ok) {
+            throw new Error(data.error || `Transcription request failed (${response.status}).`);
+        }
+
+        return (data.transcript || '').trim();
+    }
+
+    function teardownWebAudioNodes() {
         if (processorNode) {
             processorNode.onaudioprocess = null;
             try { processorNode.disconnect(); } catch {}
@@ -567,6 +598,23 @@
             try { audioCtx.close(); } catch {}
             audioCtx = null;
         }
+    }
+
+    function stopHttpFallbackRecorder() {
+        httpFallbackActive = false;
+        if (segmentTimer) {
+            clearInterval(segmentTimer);
+            segmentTimer = null;
+        }
+        if (activeRecorder && activeRecorder.state !== 'inactive') {
+            try { activeRecorder.stop(); } catch {}
+        }
+        activeRecorder = null;
+    }
+
+    function teardownAudioPipeline() {
+        teardownWebAudioNodes();
+        stopHttpFallbackRecorder();
         if (mediaStream) {
             mediaStream.getTracks().forEach(track => track.stop());
             mediaStream = null;
@@ -606,6 +654,113 @@
         stopBtn.style.display = 'none';
     }
 
+    function getSupportedRecorderMimeType() {
+        if (typeof MediaRecorder === 'undefined') return '';
+        const candidates = [
+            'audio/webm;codecs=opus',
+            'audio/webm',
+            'audio/mp4',
+            'audio/ogg;codecs=opus'
+        ];
+        for (const candidate of candidates) {
+            if (MediaRecorder.isTypeSupported(candidate)) {
+                return candidate;
+            }
+        }
+        return '';
+    }
+
+    function startHttpChunkedFallback() {
+        if (!mediaStream || typeof MediaRecorder === 'undefined') {
+            isRecording = false;
+            isPaused = false;
+            teardownAudioPipeline();
+            resetControlButtonsToIdle();
+            statusIndicator.className = 'indicator';
+            statusText.innerText = "Live transcription connection unavailable in this browser.";
+            return;
+        }
+
+        httpFallbackActive = true;
+        statusIndicator.className = 'indicator active';
+        statusText.innerText = currentContext === 'live'
+            ? "Listening to dialogue stream..."
+            : "Recording dictation recollection...";
+
+        const mimeType = getSupportedRecorderMimeType();
+
+        const startSegmentRecorder = () => {
+            if (!httpFallbackActive || !mediaStream) return;
+            const chunks = [];
+            let recorder;
+            try {
+                recorder = mimeType
+                    ? new MediaRecorder(mediaStream, { mimeType })
+                    : new MediaRecorder(mediaStream);
+            } catch (err) {
+                isRecording = false;
+                isPaused = false;
+                teardownAudioPipeline();
+                resetControlButtonsToIdle();
+                statusIndicator.className = 'indicator';
+                statusText.innerText = err && err.message ? err.message : "Failed to initialize audio recorder.";
+                return;
+            }
+
+            activeRecorder = recorder;
+
+            recorder.ondataavailable = (ev) => {
+                if (ev.data && ev.data.size > 0) {
+                    chunks.push(ev.data);
+                }
+            };
+
+            recorder.onstop = () => {
+                if (chunks.length === 0) return;
+                const blob = new Blob(chunks, { type: recorder.mimeType || mimeType || 'audio/webm' });
+                if (blob.size < 1200) return;
+
+                httpTranscribeQueue = httpTranscribeQueue.then(async () => {
+                    try {
+                        const buffer = await blob.arrayBuffer();
+                        const base64Audio = arrayBufferToBase64(buffer);
+                        const segmentText = await postTranscribeRequest(
+                            base64Audio,
+                            blob.type || 'audio/webm'
+                        );
+                        if (segmentText) {
+                            finalTranscript = appendTranscriptSegment(finalTranscript, segmentText);
+                            transcriptBox.value = finalTranscript;
+                            transcriptBox.scrollTop = transcriptBox.scrollHeight;
+                            generateIngestionPayload();
+                        }
+                    } catch (err) {
+                        isRecording = false;
+                        isPaused = false;
+                        teardownAudioPipeline();
+                        resetControlButtonsToIdle();
+                        statusIndicator.className = 'indicator';
+                        statusText.innerText = err && err.message
+                            ? err.message
+                            : "Audio transcription failed.";
+                    }
+                });
+            };
+
+            recorder.start();
+        };
+
+        startSegmentRecorder();
+        segmentTimer = setInterval(() => {
+            if (!httpFallbackActive || !isRecording || isPaused) return;
+            const prev = activeRecorder;
+            if (prev && prev.state === 'recording') {
+                prev.stop();
+            }
+            startSegmentRecorder();
+        }, 5000);
+    }
+
     async function beginLiveCapture() {
         if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
             statusIndicator.className = 'indicator';
@@ -643,6 +798,18 @@
         const wsProtocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
         const socket = new WebSocket(`${wsProtocol}//${location.host}/ws/transcribe`);
         ws = socket;
+        let wsReady = false;
+        let wsReceivedError = false;
+        let fallbackTriggered = false;
+
+        const triggerFallbackIfEligible = () => {
+            if (fallbackTriggered || wsReady || wsReceivedError) return;
+            if (!isRecording || isPaused) return;
+            fallbackTriggered = true;
+            if (ws === socket) ws = null;
+            teardownWebAudioNodes();
+            startHttpChunkedFallback();
+        };
 
         try {
             const AudioCtx = window.AudioContext || window.webkitAudioContext;
@@ -672,14 +839,10 @@
                 socket.send(JSON.stringify({ audio: base64Audio }));
             };
         } catch (err) {
-            isRecording = false;
-            isPaused = false;
-            teardownAudioPipeline();
             try { socket.close(); } catch {}
             ws = null;
-            resetControlButtonsToIdle();
-            statusIndicator.className = 'indicator';
-            statusText.innerText = "Audio capture initialization failed.";
+            teardownWebAudioNodes();
+            startHttpChunkedFallback();
             return;
         }
 
@@ -692,6 +855,7 @@
             }
 
             if (msg.type === 'ready') {
+                wsReady = true;
                 if (isRecording && !isPaused) {
                     statusIndicator.className = 'indicator active';
                     statusText.innerText = currentContext === 'live'
@@ -710,6 +874,7 @@
                 transcriptBox.scrollTop = transcriptBox.scrollHeight;
                 generateIngestionPayload();
             } else if (msg.type === 'error') {
+                wsReceivedError = true;
                 isRecording = false;
                 isPaused = false;
                 teardownAudioPipeline();
@@ -724,7 +889,9 @@
         };
 
         socket.onerror = () => {
-            if (isRecording && !isPaused) {
+            if (!wsReady && !wsReceivedError && isRecording && !isPaused) {
+                triggerFallbackIfEligible();
+            } else if (isRecording && !isPaused && !wsReceivedError) {
                 isRecording = false;
                 isPaused = false;
                 teardownAudioPipeline();
@@ -735,6 +902,10 @@
         };
 
         socket.onclose = () => {
+            if (!wsReady && !wsReceivedError && isRecording && !isPaused) {
+                triggerFallbackIfEligible();
+                return;
+            }
             if (ws === socket) ws = null;
             promoteInterimToFinal();
         };
@@ -816,22 +987,7 @@
             const base64Audio = arrayBufferToBase64(buffer);
             const mimeType = file.type || 'audio/mp3';
 
-            const response = await fetch('/api/transcribe', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    audio: base64Audio,
-                    mimeType,
-                    context: currentContext
-                })
-            });
-
-            const data = await response.json();
-            if (!response.ok) {
-                throw new Error(data.error || 'Failed to transcribe audio file.');
-            }
-
-            const fileTranscript = (data.transcript || '').trim();
+            const fileTranscript = await postTranscribeRequest(base64Audio, mimeType);
             if (fileTranscript) {
                 finalTranscript = appendTranscriptSegment(transcriptBox.value.trim(), fileTranscript);
                 currentInterim = '';
